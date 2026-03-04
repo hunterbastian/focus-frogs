@@ -2,10 +2,15 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Frog Pond</title>
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      overscroll-behavior: none;
+      -webkit-overflow-scrolling: auto;
+    }
     body {
       background: #0a0a12;
       display: flex;
@@ -13,6 +18,9 @@
       align-items: center;
       height: 100vh;
       overflow: hidden;
+      position: fixed;
+      width: 100%;
+      touch-action: none;
     }
     canvas {
       width: min(90vw, 90vh);
@@ -20,6 +28,7 @@
       image-rendering: pixelated;
       image-rendering: -moz-crisp-edges;
       image-rendering: -webkit-crisp-edges;
+      touch-action: none;
     }
   </style>
 </head>
@@ -199,6 +208,7 @@ const state = {
 const canvas = document.getElementById('pond');
 const ctx = canvas.getContext('2d');
 ctx.imageSmoothingEnabled = false;
+let hasTouchInput = false;
 
 // ─── Utilities ──────────────────────────────────────
 function dist(a, b) { return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2); }
@@ -211,6 +221,18 @@ function sectionOf(pad) { return pad.section; }
 function inView(wx, wy, margin) {
   const sx = wx - cam.x, sy = wy - cam.y;
   return sx > -margin && sx < W + margin && sy > -margin && sy < H + margin;
+}
+function touchToCanvas(touch) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (touch.clientX - rect.left) * (W / rect.width),
+    y: (touch.clientY - rect.top) * (H / rect.height),
+  };
+}
+function angleToDirection(dx, dy) {
+  return Math.abs(dx) >= Math.abs(dy)
+    ? (dx >= 0 ? 'right' : 'left')
+    : (dy >= 0 ? 'down' : 'up');
 }
 
 // ─── World Generation ───────────────────────────────
@@ -385,6 +407,16 @@ function drawHUD() {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
   ctx.fillText(save.xp + '/' + needed + 'XP', W / 2, H - 6);
+
+  // Pause button (touch only)
+  if (hasTouchInput) {
+    const pby = save.skillPoints > 0 ? 13 : 2;
+    ctx.fillStyle = '#00000066';
+    ctx.fillRect(W - 15, pby, 13, 10);
+    ctx.fillStyle = '#ffffff99';
+    ctx.fillRect(W - 12, pby + 2, 2, 6);
+    ctx.fillRect(W - 7, pby + 2, 2, 6);
+  }
 
   // Minimap (bottom-right)
   drawMinimap();
@@ -795,7 +827,15 @@ function drawUpgradeScreen() {
   ctx.fillStyle = '#ffffff44';
   ctx.font = `3px ${F}`;
   ctx.textAlign = 'center';
-  ctx.fillText('UP/DN:MOVE SPC:BUY ESC:BACK', W / 2, H - 6);
+  ctx.fillText(hasTouchInput ? 'TAP ITEM · TOP:BACK' : 'UP/DN:MOVE SPC:BUY ESC:BACK', W / 2, H - 6);
+
+  if (hasTouchInput) {
+    ctx.fillStyle = '#ffffff88';
+    ctx.font = `4px ${F}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText('< BACK', 4, 8);
+  }
 }
 
 // ─── Pause Menu ─────────────────────────────────────
@@ -847,7 +887,7 @@ function drawPauseMenu() {
   // Footer
   ctx.fillStyle = '#ffffff33';
   ctx.font = `3px ${F}`;
-  ctx.fillText('ESC:RESUME', W / 2, H - 10);
+  ctx.fillText(hasTouchInput ? 'TAP TO SELECT' : 'ESC:RESUME', W / 2, H - 10);
 }
 
 function pauseSelect() {
@@ -895,11 +935,11 @@ function drawTitleScreen() {
   if (blink) {
     ctx.fillStyle = P[10];
     ctx.font = `5px ${F}`;
-    ctx.fillText('PRESS SPACE', W / 2, H - 30);
+    ctx.fillText(hasTouchInput ? 'TAP TO START' : 'PRESS SPACE', W / 2, H - 30);
   }
   ctx.fillStyle = '#ffffff55';
   ctx.font = `4px ${F}`;
-  ctx.fillText('ESC = UPGRADES', W / 2, H - 14);
+  ctx.fillText(hasTouchInput ? 'TAP HERE: UPGRADES' : 'ESC = UPGRADES', W / 2, H - 14);
 }
 
 // ─── Input ──────────────────────────────────────────
@@ -963,6 +1003,68 @@ document.addEventListener('keydown', (e) => {
     state.frog.jumpStart = state.time;
   }
 });
+
+// ─── Touch Input ───────────────────────────────────
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+function handleTouchTitle(pos) {
+  if (pos.y >= 160) { state.prevScreen = 'title'; enterUpgrades(); }
+  else startGame();
+}
+
+function handleTouchPlaying(pos) {
+  if (pos.x >= W - 20 && pos.y <= 25) {
+    state.screen = 'paused'; state.pauseCursor = 0; return;
+  }
+  if (state.frog.jumping) return;
+  const pad = state.pads[state.frog.pad];
+  const dx = pos.x - (pad.x - cam.x);
+  const dy = pos.y - (pad.y - cam.y);
+  if (Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
+  const dir = angleToDirection(dx, dy);
+  const t = findTargetPad(dir);
+  if (t >= 0) {
+    state.frog.target = t;
+    state.frog.jumping = true;
+    state.frog.jumpStart = state.time;
+  }
+}
+
+function handleTouchPaused(pos) {
+  for (let i = 0; i < PAUSE_ITEMS.length; i++) {
+    const y = 78 + i * 18;
+    if (pos.y >= y - 5 && pos.y <= y + 9 && pos.x >= 46 && pos.x <= 146) {
+      state.pauseCursor = i; pauseSelect(); return;
+    }
+  }
+}
+
+function handleTouchUpgrades(pos) {
+  if (pos.y <= 16 || pos.y >= H - 12) { state.screen = state.prevScreen; return; }
+  let y = 28;
+  for (let i = 0; i < state.menuItems.length; i++) {
+    const item = state.menuItems[i];
+    if (item.type === 'header') { y += 10; continue; }
+    if (item.selectable && pos.y >= y - 1 && pos.y <= y + 9) {
+      state.menuCursor = i; menuSelect(); return;
+    }
+    y += 11;
+  }
+}
+
+function handleTouch(pos) {
+  if (state.screen === 'title') handleTouchTitle(pos);
+  else if (state.screen === 'playing') handleTouchPlaying(pos);
+  else if (state.screen === 'paused') handleTouchPaused(pos);
+  else if (state.screen === 'upgrades') handleTouchUpgrades(pos);
+}
+
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault(); hasTouchInput = true;
+  handleTouch(touchToCanvas(e.changedTouches[0]));
+}, { passive: false });
+canvas.addEventListener('touchmove', (e) => { e.preventDefault(); }, { passive: false });
+canvas.addEventListener('touchend', (e) => { e.preventDefault(); }, { passive: false });
 
 // ─── Start / Loop ───────────────────────────────────
 function enterUpgrades() {
