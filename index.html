@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Frog Pond</title>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0a0a12;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      overflow: hidden;
+    }
+    canvas {
+      width: min(90vw, 90vh);
+      height: min(90vw, 90vh);
+      image-rendering: pixelated;
+      image-rendering: -moz-crisp-edges;
+      image-rendering: -webkit-crisp-edges;
+    }
+  </style>
+</head>
+<body>
+<canvas id="pond" width="192" height="192"></canvas>
+<script>
+// ─── Config ─────────────────────────────────────────
+const W = 192, H = 192;
+const F = "'Press Start 2P', monospace";
+const CONFIG = {
+  PAD_RADIUS: 14,
+  JUMP_DURATION: 280,
+  JUMP_ARC: 22,
+  FRUIT_SPAWN_MS: 3000,
+  MAX_FRUIT: 6,
+  AIM_CONE: Math.PI / 3,
+};
+
+// ─── Palette ────────────────────────────────────────
+const P = {
+  0: null,
+  1: '#265c42', 2: '#3e8948', 3: '#63c74d', 4: '#a8ca58',
+  5: '#1a1c2c', 6: '#e8e8e8', 7: '#181425',
+  8: '#e43b44', 9: '#f7a53e', 10: '#fee761',
+  11: '#2f5753', 12: '#124e89', 13: '#0b3d6e',
+  14: '#4da84b', 15: '#1b6fa8',
+  // Blue frog
+  16: '#0f2847', 17: '#1e3a5f', 18: '#2d6aa0', 19: '#4da6ff', 20: '#7ec8e3',
+  // Fire frog
+  21: '#6c1212', 22: '#8b1a1a', 23: '#c23616', 24: '#e74c3c', 25: '#f39c12',
+  // Ghost frog
+  26: '#4b4b5b', 27: '#6b6b7b', 28: '#9b9bab', 29: '#d0d0e0', 30: '#f0f0ff',
+  // Gold frog
+  31: '#6b4f0e', 32: '#8b6914', 33: '#c9a01c', 34: '#ffd700', 35: '#fff44f',
+};
+
+// ─── Sections (world layout) ────────────────────────
+const SECTIONS = [
+  { name: 'CENTER', wx: 192, wy: 192, padCount: 7, adj: [1, 2, 3, 4] },
+  { name: 'NORTH',  wx: 192, wy: 0,   padCount: 6, adj: [0] },
+  { name: 'WEST',   wx: 0,   wy: 192, padCount: 5, adj: [0] },
+  { name: 'EAST',   wx: 384, wy: 192, padCount: 5, adj: [0] },
+  { name: 'SOUTH',  wx: 192, wy: 384, padCount: 6, adj: [0] },
+];
+
+// Borders between adjacent sections: [sectionA, sectionB, side]
+// side = which edge of sectionA touches sectionB
+const BORDERS = [
+  [0, 1, 'top'],    // CENTER top ↔ NORTH bottom
+  [0, 2, 'left'],   // CENTER left ↔ WEST right
+  [0, 3, 'right'],  // CENTER right ↔ EAST left
+  [0, 4, 'bottom'], // CENTER bottom ↔ SOUTH top
+];
+
+// ─── Sprites ────────────────────────────────────────
+const FROG = [
+  [0,0,0,6,7,0,0,6,7,0,0,0],
+  [0,0,6,6,7,0,0,6,7,6,0,0],
+  [0,1,14,14,14,14,14,14,14,14,1,0],
+  [1,14,3,3,3,3,3,3,3,3,14,1],
+  [1,14,3,4,3,3,3,3,4,3,14,1],
+  [0,1,14,3,3,3,3,3,3,14,1,0],
+  [0,0,1,14,14,14,14,14,14,1,0,0],
+  [0,1,1,0,1,1,1,1,0,1,1,0],
+  [1,2,0,0,0,1,1,0,0,0,2,1],
+  [2,0,0,0,0,0,0,0,0,0,0,2],
+];
+
+const FROG_JUMP = [
+  [0,0,6,7,0,0,0,0,6,7,0,0],
+  [0,6,6,7,0,0,0,0,6,7,6,0],
+  [0,1,14,14,14,14,14,14,14,14,1,0],
+  [1,14,3,3,3,3,3,3,3,3,14,1],
+  [1,14,3,3,3,3,3,3,3,3,14,1],
+  [0,1,14,14,14,14,14,14,14,14,1,0],
+  [1,0,0,1,14,14,14,14,1,0,0,1],
+  [2,0,0,0,1,1,1,1,0,0,0,2],
+  [1,0,0,0,0,0,0,0,0,0,0,1],
+];
+
+const FRUIT = {
+  apple: [
+    [0,0,1,0,0,0],[0,0,0,1,0,0],
+    [0,8,8,8,8,0],[8,8,8,8,8,8],
+    [8,8,8,8,8,8],[0,8,8,8,8,0],
+  ],
+  orange: [
+    [0,0,1,0,0,0],[0,9,9,9,0,0],
+    [9,9,10,9,9,0],[9,9,9,9,9,9],
+    [9,9,9,9,9,9],[0,9,9,9,9,0],
+  ],
+  cherry: [
+    [0,0,1,1,0,0],[0,1,0,0,1,0],
+    [8,0,0,0,0,8],[8,8,0,0,8,8],
+    [8,8,0,0,8,8],[0,0,0,0,0,0],
+  ],
+};
+
+// ─── Frog Registry ──────────────────────────────────
+const FROGS = [
+  { name: 'FROG',       colorMap: null,                              cost: 0 },
+  { name: 'BLUE FROG',  colorMap: {1:16, 2:17, 14:18, 3:19, 4:20}, cost: 1 },
+  { name: 'FIRE FROG',  colorMap: {1:21, 2:22, 14:23, 3:24, 4:25}, cost: 1 },
+  { name: 'GHOST FROG', colorMap: {1:26, 2:27, 14:28, 3:29, 4:30}, cost: 1 },
+  { name: 'GOLD FROG',  colorMap: {1:31, 2:32, 14:33, 3:34, 4:35}, cost: 3 },
+];
+
+// ─── Upgrades Registry ──────────────────────────────
+const UPGRADES = [
+  { id: 'swift',    name: 'SWIFT JUMP', desc: '-20% jump time',      cost: 1, cat: 'jump' },
+  { id: 'high',     name: 'HIGH JUMP',  desc: '+25% jump arc',       cost: 1, cat: 'jump' },
+  { id: 'reach',    name: 'LONG REACH', desc: 'wider aim cone',      cost: 1, cat: 'jump' },
+  { id: 'abundant', name: 'ABUNDANT',   desc: 'fruit spawns faster', cost: 1, cat: 'fruit' },
+  { id: 'bountiful',name: 'BOUNTIFUL',  desc: '+5 pts per fruit',    cost: 1, cat: 'fruit' },
+  { id: 'plenty',   name: 'PLENTY',     desc: '+2 max fruit',        cost: 1, cat: 'fruit' },
+];
+
+// ─── Save System ────────────────────────────────────
+const SAVE_KEY = 'frogpond';
+function loadSave() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (raw) {
+      const s = JSON.parse(raw);
+      return {
+        level: s.level || 1, xp: s.xp || 0,
+        skillPoints: s.skillPoints || 0,
+        selectedFrog: s.selectedFrog || 0,
+        unlocked: s.unlocked || [0],
+        upgrades: s.upgrades || [],
+      };
+    }
+  } catch(e) {}
+  return { level: 1, xp: 0, skillPoints: 0, selectedFrog: 0, unlocked: [0], upgrades: [] };
+}
+function writeSave() { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); }
+const save = loadSave();
+
+// ─── Effective Stats ────────────────────────────────
+function eff() {
+  const u = save.upgrades;
+  return {
+    jumpDur:  CONFIG.JUMP_DURATION * (u.includes('swift') ? 0.8 : 1),
+    jumpArc:  CONFIG.JUMP_ARC * (u.includes('high') ? 1.25 : 1),
+    aimCone:  u.includes('reach') ? Math.PI / 2.5 : CONFIG.AIM_CONE,
+    spawnMs:  CONFIG.FRUIT_SPAWN_MS * (u.includes('abundant') ? 0.7 : 1),
+    bonusPts: u.includes('bountiful') ? 5 : 0,
+    maxFruit: CONFIG.MAX_FRUIT + (u.includes('plenty') ? 2 : 0),
+  };
+}
+
+// ─── XP ─────────────────────────────────────────────
+function xpForLevel(lv) { return Math.floor(50 * Math.pow(lv, 1.5)); }
+
+// ─── State ──────────────────────────────────────────
+const cam = { x: 192, y: 192, tx: 192, ty: 192 };
+const state = {
+  screen: 'title', // 'title' | 'playing' | 'paused' | 'upgrades'
+  prevScreen: 'title', // where to return from upgrades
+  score: 0,
+  frog: { pad: 0, target: null, jumpStart: 0, jumping: false, drawX: 0, drawY: 0 },
+  pads: [],
+  currentSection: 0,
+  lastSpawn: 0,
+  time: 0,
+  waterPhase: 0,
+  flash: 0,
+  levelUp: 0,
+  sectionLabel: 0,
+  sectionName: '',
+  menuCursor: 0,
+  menuItems: [],
+  pauseCursor: 0,
+};
+
+// ─── Canvas ─────────────────────────────────────────
+const canvas = document.getElementById('pond');
+const ctx = canvas.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+
+// ─── Utilities ──────────────────────────────────────
+function dist(a, b) { return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2); }
+function normAngle(a) { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; }
+function remapSprite(sprite, colorMap) {
+  if (!colorMap) return sprite;
+  return sprite.map(row => row.map(c => colorMap[c] !== undefined ? colorMap[c] : c));
+}
+function sectionOf(pad) { return pad.section; }
+function inView(wx, wy, margin) {
+  const sx = wx - cam.x, sy = wy - cam.y;
+  return sx > -margin && sx < W + margin && sy > -margin && sy < H + margin;
+}
+
+// ─── World Generation ───────────────────────────────
+function generateWorld() {
+  const pads = [];
+  const R = CONFIG.PAD_RADIUS;
+  const minD = R * 2.8;
+
+  // Generate interior pads for each section
+  SECTIONS.forEach((sec, si) => {
+    const margin = 30;
+    const count = sec.padCount;
+
+    // First pad near center of section
+    pads.push({
+      x: sec.wx + W / 2, y: sec.wy + H / 2,
+      section: si, hasFruit: false, fruitType: null,
+    });
+
+    let attempts = 0;
+    const secPads = pads.filter(p => p.section === si);
+    while (secPads.length < count && attempts < 200) {
+      const c = {
+        x: sec.wx + margin + Math.random() * (W - margin * 2),
+        y: sec.wy + margin + Math.random() * (H - margin * 2),
+        section: si, hasFruit: false, fruitType: null,
+      };
+      const tooClose = pads.some(p => dist(p, c) < minD);
+      const reachable = secPads.some(p => dist(p, c) < minD * 2.2);
+      if (!tooClose && reachable) {
+        pads.push(c);
+        secPads.push(c);
+      }
+      attempts++;
+    }
+  });
+
+  // Generate bridge pads at borders
+  BORDERS.forEach(([sA, sB, side]) => {
+    const a = SECTIONS[sA], b = SECTIONS[sB];
+    // Place a pad near the edge of each section, aligned so they're jumpable
+    const spread = 40 + Math.random() * 60; // lateral position variation
+    let ax, ay, bx, by;
+
+    if (side === 'top') {
+      ax = a.wx + 60 + spread; ay = a.wy + 18;
+      bx = b.wx + 60 + spread; by = b.wy + H - 18;
+    } else if (side === 'bottom') {
+      ax = a.wx + 60 + spread; ay = a.wy + H - 18;
+      bx = b.wx + 60 + spread; by = b.wy + 18;
+    } else if (side === 'left') {
+      ax = a.wx + 18; ay = a.wy + 60 + spread;
+      bx = b.wx + W - 18; by = b.wy + 60 + spread;
+    } else { // right
+      ax = a.wx + W - 18; ay = a.wy + 60 + spread;
+      bx = b.wx + 18; by = b.wy + 60 + spread;
+    }
+
+    // Only add if not too close to existing pads
+    if (!pads.some(p => dist(p, {x:ax,y:ay}) < minD * 0.8)) {
+      pads.push({ x: ax, y: ay, section: sA, hasFruit: false, fruitType: null, isBridge: true });
+    }
+    if (!pads.some(p => dist(p, {x:bx,y:by}) < minD * 0.8)) {
+      pads.push({ x: bx, y: by, section: sB, hasFruit: false, fruitType: null, isBridge: true });
+    }
+  });
+
+  return pads;
+}
+
+// ─── Drawing ────────────────────────────────────────
+function drawSprite(sprite, x, y) {
+  for (let r = 0; r < sprite.length; r++) {
+    for (let c = 0; c < sprite[r].length; c++) {
+      const idx = sprite[r][c];
+      if (!idx) continue;
+      ctx.fillStyle = P[idx];
+      ctx.fillRect(Math.floor(x + c), Math.floor(y + r), 1, 1);
+    }
+  }
+}
+
+function drawWater() {
+  ctx.fillStyle = P[5];
+  ctx.fillRect(0, 0, W, H);
+  state.waterPhase += 0.015;
+  for (let y = 0; y < H; y += 6) {
+    const off = Math.sin((y + state.waterPhase * 40) * 0.12) * 1.5;
+    ctx.fillStyle = P[13];
+    ctx.fillRect(0, y + Math.floor(off), W, 1);
+  }
+  for (let y = 3; y < H; y += 12) {
+    const off = Math.cos((y + state.waterPhase * 25) * 0.09) * 2;
+    ctx.fillStyle = P[15];
+    ctx.fillRect(0, y + Math.floor(off), W, 1);
+  }
+}
+
+function drawLilyPad(x, y, r, isBridge) {
+  x = Math.floor(x); y = Math.floor(y);
+  const cTop = isBridge ? P[4] : P[3];
+  const cBot = isBridge ? P[3] : P[2];
+  for (let dy = -r; dy <= r; dy++) {
+    const w = Math.floor(Math.sqrt(r * r - dy * dy));
+    ctx.fillStyle = P[11];
+    ctx.fillRect(x - w + 1, y + dy + 1, w * 2, 1);
+    ctx.fillStyle = dy < -r / 3 ? cTop : cBot;
+    ctx.fillRect(x - w, y + dy, w * 2, 1);
+  }
+  ctx.fillStyle = P[5];
+  for (let i = 0; i < r; i++) {
+    const nw = Math.max(1, Math.floor(i * 0.4));
+    ctx.fillRect(x - nw, y - r + i, nw * 2, 1);
+  }
+}
+
+function drawFruitOnPad(pad) {
+  if (!pad.hasFruit) return;
+  if (!inView(pad.x, pad.y, 20)) return;
+  const sprite = FRUIT[pad.fruitType];
+  const bob = Math.sin(state.time * 0.004) * 1.5;
+  const sx = pad.x - cam.x, sy = pad.y - cam.y;
+  drawSprite(sprite, sx - 3, sy - CONFIG.PAD_RADIUS - 4 + bob);
+}
+
+function drawFrog() {
+  const f = state.frog;
+  let wx, wy;
+  if (f.jumping) {
+    wx = f.drawX; wy = f.drawY;
+  } else {
+    const pad = state.pads[f.pad];
+    wx = pad.x; wy = pad.y;
+  }
+  const sx = wx - cam.x, sy = wy - cam.y;
+  const frogDef = FROGS[save.selectedFrog];
+  const sprite = remapSprite(f.jumping ? FROG_JUMP : FROG, frogDef.colorMap);
+  const offX = -Math.floor(sprite[0].length / 2);
+  const offY = -sprite.length + 2;
+  drawSprite(sprite, sx + offX, sy + offY);
+}
+
+function drawHUD() {
+  // Score + level
+  ctx.fillStyle = '#00000088';
+  ctx.fillRect(1, 1, 90, 10);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `5px ${F}`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText('LV' + save.level + ' ' + state.score + 'PTS', 3, 3);
+
+  // Skill points (top right)
+  if (save.skillPoints > 0) {
+    ctx.fillStyle = '#00000088';
+    ctx.fillRect(W - 36, 1, 35, 10);
+    ctx.fillStyle = P[10];
+    ctx.font = `5px ${F}`;
+    ctx.textAlign = 'right';
+    ctx.fillText(save.skillPoints + 'SP', W - 3, 3);
+  }
+
+  // XP bar (bottom)
+  const needed = xpForLevel(save.level);
+  const pct = Math.min(save.xp / needed, 1);
+  ctx.fillStyle = '#00000077';
+  ctx.fillRect(0, H - 5, W, 5);
+  ctx.fillStyle = P[3];
+  ctx.fillRect(1, H - 4, Math.floor((W - 2) * pct), 3);
+  ctx.fillStyle = '#ffffff77';
+  ctx.font = `4px ${F}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText(save.xp + '/' + needed + 'XP', W / 2, H - 6);
+
+  // Minimap (bottom-right)
+  drawMinimap();
+}
+
+function drawMinimap() {
+  const s = 10;
+  const gap = 1;
+  const mx = W - (3 * s + 2 * gap) - 3, my = H - (3 * s + 2 * gap) - 3;
+
+  // [gridCol, gridRow, sectionIndex, label]
+  const cells = [
+    [1, 0, 1, 'N'],
+    [0, 1, 2, 'W'],
+    [1, 1, 0, 'C'],
+    [2, 1, 3, 'E'],
+    [1, 2, 4, 'S'],
+  ];
+
+  cells.forEach(([cx, cy, si, label]) => {
+    const rx = mx + cx * (s + gap);
+    const ry = my + cy * (s + gap);
+    const isCurrent = si === state.currentSection;
+    const visited = state.visitedSections && state.visitedSections.has(si);
+    ctx.fillStyle = isCurrent ? P[3] : visited ? '#ffffff44' : '#ffffff22';
+    ctx.fillRect(rx, ry, s, s);
+
+    // Section letter
+    ctx.fillStyle = isCurrent ? '#ffffff' : visited ? '#ffffffaa' : '#ffffff55';
+    ctx.font = `4px ${F}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rx + s / 2, ry + s / 2 + 1);
+
+    // Frog dot on current section
+    if (isCurrent) {
+      const pad = state.pads[state.frog.pad];
+      if (pad) {
+        const sec = SECTIONS[si];
+        const fx = rx + 1 + ((pad.x - sec.wx) / W) * (s - 2);
+        const fy = ry + 1 + ((pad.y - sec.wy) / H) * (s - 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(Math.floor(fx), Math.floor(fy), 2, 2);
+      }
+    }
+  });
+}
+
+// Placeholder arrow sprites (5x5) — will be replaced with user pixel art
+const ARROW_UP = [
+  [0,0,6,0,0],
+  [0,6,6,6,0],
+  [6,0,6,0,6],
+  [0,0,6,0,0],
+  [0,0,6,0,0],
+];
+const ARROW_DOWN = [
+  [0,0,6,0,0],
+  [0,0,6,0,0],
+  [6,0,6,0,6],
+  [0,6,6,6,0],
+  [0,0,6,0,0],
+];
+const ARROW_LEFT = [
+  [0,0,6,0,0],
+  [0,6,0,0,0],
+  [6,6,6,6,6],
+  [0,6,0,0,0],
+  [0,0,6,0,0],
+];
+const ARROW_RIGHT = [
+  [0,0,6,0,0],
+  [0,0,0,6,0],
+  [6,6,6,6,6],
+  [0,0,0,6,0],
+  [0,0,6,0,0],
+];
+
+function drawEdgeArrows() {
+  const sec = SECTIONS[state.currentSection];
+  const alpha = 0.4 + 0.3 * Math.sin(state.time * 0.003);
+  ctx.globalAlpha = alpha;
+
+  // For each border where current section is sA, show arrow at that edge
+  BORDERS.forEach(([sA, sB, side]) => {
+    let arrowSec, dir;
+    if (sA === state.currentSection) { arrowSec = sB; dir = side; }
+    else if (sB === state.currentSection) {
+      arrowSec = sA;
+      // Flip direction (if CENTER's top touches NORTH, then from NORTH's perspective it's bottom)
+      dir = side === 'top' ? 'bottom' : side === 'bottom' ? 'top' : side === 'left' ? 'right' : 'left';
+    } else return;
+
+    const label = SECTIONS[arrowSec].name[0]; // First letter: N, W, E, S, or C
+    let sprite, sx, sy, lx, ly;
+    if (dir === 'top') {
+      sprite = ARROW_UP; sx = W / 2 - 2; sy = 3; lx = W / 2; ly = 12;
+    } else if (dir === 'bottom') {
+      sprite = ARROW_DOWN; sx = W / 2 - 2; sy = H - 8; lx = W / 2; ly = H - 12;
+    } else if (dir === 'left') {
+      sprite = ARROW_LEFT; sx = 3; sy = H / 2 - 2; lx = 12; ly = H / 2 + 1;
+    } else {
+      sprite = ARROW_RIGHT; sx = W - 8; sy = H / 2 - 2; lx = W - 12; ly = H / 2 + 1;
+    }
+
+    drawSprite(sprite, sx, sy);
+    ctx.fillStyle = P[6];
+    ctx.font = `4px ${F}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, lx, ly);
+  });
+
+  ctx.globalAlpha = 1;
+}
+
+function drawFlash() {
+  if (state.flash <= 0) return;
+  ctx.fillStyle = `rgba(254,231,97,${state.flash})`;
+  ctx.fillRect(0, 0, W, H);
+  state.flash -= 0.06;
+}
+
+function drawLevelUp() {
+  if (state.levelUp <= 0) return;
+  const alpha = Math.min(state.levelUp / 30, 1);
+  const yOff = (1 - alpha) * -8;
+  ctx.fillStyle = `rgba(99,199,77,${alpha})`;
+  ctx.font = `7px ${F}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('LEVEL UP!', W / 2, H / 2 - 30 + yOff);
+  ctx.fillStyle = `rgba(255,255,255,${alpha * 0.8})`;
+  ctx.font = `4px ${F}`;
+  ctx.fillText('LV ' + save.level + '  +1 SP', W / 2, H / 2 - 18 + yOff);
+  state.levelUp -= 0.8;
+}
+
+function drawSectionLabel() {
+  if (state.sectionLabel <= 0) return;
+  // Hold fully opaque for first 20 frames, then fade
+  const alpha = state.sectionLabel > 40 ? 0.85 : (state.sectionLabel / 40) * 0.85;
+  const text = '~ ' + state.sectionName + ' ~';
+  ctx.font = `6px ${F}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  // Dark background pill
+  const tw = ctx.measureText(text).width;
+  ctx.fillStyle = `rgba(0,0,0,${alpha * 0.6})`;
+  ctx.fillRect(W / 2 - tw / 2 - 4, 12, tw + 8, 12);
+  // Text
+  ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+  ctx.fillText(text, W / 2, 14);
+  state.sectionLabel -= 0.6;
+}
+
+// ─── Game Logic ─────────────────────────────────────
+function findTargetPad(dir) {
+  const angles = { up: -Math.PI / 2, down: Math.PI / 2, left: Math.PI, right: 0 };
+  const target = angles[dir];
+  const cur = state.pads[state.frog.pad];
+  const cone = eff().aimCone;
+  let best = -1, bestD = Infinity;
+
+  state.pads.forEach((pad, i) => {
+    if (i === state.frog.pad) return;
+    const dx = pad.x - cur.x, dy = pad.y - cur.y;
+    const angle = Math.atan2(dy, dx);
+    const diff = Math.abs(normAngle(angle - target));
+    const d = dist(cur, pad);
+    // Max jump distance ~90px (covers cross-border bridge pads)
+    if (diff < cone && d < 90 && d < bestD) { bestD = d; best = i; }
+  });
+  return best;
+}
+
+function updateCamera() {
+  cam.x += (cam.tx - cam.x) * 0.1;
+  cam.y += (cam.ty - cam.y) * 0.1;
+  // Snap when close enough
+  if (Math.abs(cam.x - cam.tx) < 0.5) cam.x = cam.tx;
+  if (Math.abs(cam.y - cam.ty) < 0.5) cam.y = cam.ty;
+}
+
+function updateJump(ts) {
+  if (!state.frog.jumping) return;
+  const elapsed = ts - state.frog.jumpStart;
+  const stats = eff();
+  const t = Math.min(elapsed / stats.jumpDur, 1);
+
+  const s = state.pads[state.frog.pad];
+  const e = state.pads[state.frog.target];
+
+  state.frog.drawX = s.x + (e.x - s.x) * t;
+  state.frog.drawY = s.y + (e.y - s.y) * t;
+  state.frog.drawY -= stats.jumpArc * 4 * t * (1 - t);
+
+  if (t >= 1) {
+    state.frog.pad = state.frog.target;
+    state.frog.target = null;
+    state.frog.jumping = false;
+
+    // Check section change
+    const newSec = state.pads[state.frog.pad].section;
+    if (newSec !== state.currentSection) {
+      state.currentSection = newSec;
+      state.visitedSections.add(newSec);
+      const sec = SECTIONS[newSec];
+      cam.tx = sec.wx;
+      cam.ty = sec.wy;
+      state.sectionName = sec.name;
+      state.sectionLabel = 60;
+    }
+
+    checkCollection();
+  }
+}
+
+function updateFruitSpawning(ts) {
+  const stats = eff();
+  if (ts - state.lastSpawn < stats.spawnMs) return;
+  state.lastSpawn = ts;
+
+  const fruitCount = state.pads.filter(p => p.hasFruit).length;
+  if (fruitCount >= stats.maxFruit) return;
+
+  const empty = state.pads
+    .map((p, i) => ({ p, i }))
+    .filter(({ p, i }) => !p.hasFruit && i !== state.frog.pad);
+  if (empty.length === 0) return;
+
+  const pick = empty[Math.floor(Math.random() * empty.length)];
+  const types = ['apple', 'orange', 'cherry'];
+  pick.p.hasFruit = true;
+  pick.p.fruitType = types[Math.floor(Math.random() * types.length)];
+}
+
+function checkCollection() {
+  const pad = state.pads[state.frog.pad];
+  if (!pad.hasFruit) return;
+  const basePts = { apple: 10, orange: 15, cherry: 25 };
+  const pts = (basePts[pad.fruitType] || 10) + eff().bonusPts;
+  state.score += pts;
+  pad.hasFruit = false;
+  pad.fruitType = null;
+  state.flash = 0.25;
+
+  save.xp += pts;
+  const needed = xpForLevel(save.level);
+  if (save.xp >= needed) {
+    save.xp -= needed;
+    save.level++;
+    save.skillPoints++;
+    state.levelUp = 80;
+    state.flash = 0.5;
+  }
+  writeSave();
+}
+
+// ─── Update & Draw ──────────────────────────────────
+function update(ts) {
+  updateCamera();
+  updateJump(ts);
+  updateFruitSpawning(ts);
+}
+
+function draw() {
+  drawWater();
+  state.pads.forEach(pad => {
+    if (!inView(pad.x, pad.y, 20)) return;
+    drawLilyPad(pad.x - cam.x, pad.y - cam.y, CONFIG.PAD_RADIUS, pad.isBridge);
+    drawFruitOnPad(pad);
+  });
+  drawFrog();
+  drawFlash();
+  drawLevelUp();
+  drawSectionLabel();
+  drawEdgeArrows();
+  drawHUD();
+}
+
+// ─── Upgrade Screen ─────────────────────────────────
+function buildMenu() {
+  const items = [];
+  items.push({ type: 'header', text: '~ FROGS ~' });
+  FROGS.forEach((f, i) => {
+    items.push({
+      type: 'frog', index: i, name: f.name, cost: f.cost,
+      owned: save.unlocked.includes(i),
+      active: save.selectedFrog === i, selectable: true,
+    });
+  });
+  items.push({ type: 'header', text: '~ JUMP ~' });
+  UPGRADES.filter(u => u.cat === 'jump').forEach(u => {
+    items.push({
+      type: 'upgrade', id: u.id, name: u.name, desc: u.desc,
+      cost: u.cost, owned: save.upgrades.includes(u.id), selectable: true,
+    });
+  });
+  items.push({ type: 'header', text: '~ FRUIT ~' });
+  UPGRADES.filter(u => u.cat === 'fruit').forEach(u => {
+    items.push({
+      type: 'upgrade', id: u.id, name: u.name, desc: u.desc,
+      cost: u.cost, owned: save.upgrades.includes(u.id), selectable: true,
+    });
+  });
+  return items;
+}
+
+function menuMove(dir) {
+  const items = state.menuItems;
+  let c = state.menuCursor;
+  do {
+    c += dir;
+    if (c < 0) c = items.length - 1;
+    if (c >= items.length) c = 0;
+  } while (!items[c].selectable && c !== state.menuCursor);
+  state.menuCursor = c;
+}
+
+function menuSelect() {
+  const item = state.menuItems[state.menuCursor];
+  if (!item || !item.selectable) return;
+
+  if (item.type === 'frog') {
+    if (item.owned) {
+      save.selectedFrog = item.index;
+      writeSave(); state.menuItems = buildMenu();
+    } else if (save.skillPoints >= item.cost) {
+      save.skillPoints -= item.cost;
+      save.unlocked.push(item.index);
+      save.selectedFrog = item.index;
+      writeSave(); state.menuItems = buildMenu();
+    }
+  } else if (item.type === 'upgrade') {
+    if (!item.owned && save.skillPoints >= item.cost) {
+      save.skillPoints -= item.cost;
+      save.upgrades.push(item.id);
+      writeSave(); state.menuItems = buildMenu();
+    }
+  }
+}
+
+function drawUpgradeScreen() {
+  drawWater();
+  ctx.fillStyle = '#000000aa';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = P[3];
+  ctx.font = `7px ${F}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillText('UPGRADES', W / 2, 6);
+
+  ctx.fillStyle = P[10];
+  ctx.font = `4px ${F}`;
+  ctx.fillText('SKILL PTS: ' + save.skillPoints, W / 2, 18);
+
+  let y = 28;
+  const items = state.menuItems;
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const sel = i === state.menuCursor;
+
+    if (item.type === 'header') {
+      ctx.fillStyle = P[15];
+      ctx.font = `4px ${F}`;
+      ctx.textAlign = 'center';
+      ctx.fillText(item.text, W / 2, y);
+      y += 10;
+      continue;
+    }
+
+    if (sel) {
+      ctx.fillStyle = '#ffffff15';
+      ctx.fillRect(6, y - 1, W - 12, 10);
+      ctx.fillStyle = P[10];
+      ctx.font = `4px ${F}`;
+      ctx.textAlign = 'left';
+      ctx.fillText('>', 8, y);
+    }
+
+    if (item.type === 'frog') {
+      const fDef = FROGS[item.index];
+      ctx.fillStyle = fDef.colorMap ? P[fDef.colorMap[3]] : P[3];
+      ctx.fillRect(16, y + 1, 4, 4);
+    }
+
+    ctx.fillStyle = item.owned ? '#888888' : '#ffffff';
+    ctx.font = `4px ${F}`;
+    ctx.textAlign = 'left';
+    ctx.fillText(item.name, item.type === 'frog' ? 22 : 16, y);
+
+    ctx.textAlign = 'right';
+    if (item.type === 'frog' && item.active) {
+      ctx.fillStyle = P[3];
+      ctx.fillText('USE', W - 10, y);
+    } else if (item.owned) {
+      ctx.fillStyle = '#555555';
+      ctx.fillText('OWN', W - 10, y);
+    } else {
+      ctx.fillStyle = save.skillPoints >= item.cost ? P[10] : '#e43b44';
+      ctx.fillText(item.cost + 'SP', W - 10, y);
+    }
+    y += 11;
+  }
+
+  ctx.fillStyle = '#ffffff44';
+  ctx.font = `3px ${F}`;
+  ctx.textAlign = 'center';
+  ctx.fillText('UP/DN:MOVE SPC:BUY ESC:BACK', W / 2, H - 6);
+}
+
+// ─── Pause Menu ─────────────────────────────────────
+const PAUSE_ITEMS = ['RESUME', 'UPGRADES', 'RESTART'];
+
+function drawPauseMenu() {
+  // Draw the game frozen underneath
+  drawWater();
+  state.pads.forEach(pad => {
+    if (!inView(pad.x, pad.y, 20)) return;
+    drawLilyPad(pad.x - cam.x, pad.y - cam.y, CONFIG.PAD_RADIUS, pad.isBridge);
+    drawFruitOnPad(pad);
+  });
+  drawFrog();
+
+  // Dim overlay
+  ctx.fillStyle = '#000000bb';
+  ctx.fillRect(0, 0, W, H);
+
+  // Title
+  ctx.fillStyle = P[3];
+  ctx.font = `7px ${F}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('PAUSED', W / 2, 40);
+
+  // Stats
+  ctx.fillStyle = '#ffffff77';
+  ctx.font = `4px ${F}`;
+  ctx.fillText('LV' + save.level + '  ' + state.score + 'PTS  ' + save.skillPoints + 'SP', W / 2, 56);
+
+  // Menu items
+  PAUSE_ITEMS.forEach((label, i) => {
+    const y = 78 + i * 18;
+    const sel = i === state.pauseCursor;
+
+    if (sel) {
+      ctx.fillStyle = '#ffffff11';
+      ctx.fillRect(W / 2 - 50, y - 5, 100, 14);
+    }
+
+    ctx.fillStyle = sel ? P[10] : '#ffffff88';
+    ctx.font = `5px ${F}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText((sel ? '> ' : '  ') + label + (sel ? ' <' : ''), W / 2, y);
+  });
+
+  // Footer
+  ctx.fillStyle = '#ffffff33';
+  ctx.font = `3px ${F}`;
+  ctx.fillText('ESC:RESUME', W / 2, H - 10);
+}
+
+function pauseSelect() {
+  const action = PAUSE_ITEMS[state.pauseCursor];
+  if (action === 'RESUME') {
+    state.screen = 'playing';
+  } else if (action === 'UPGRADES') {
+    state.prevScreen = 'paused';
+    enterUpgrades();
+  } else if (action === 'RESTART') {
+    startGame();
+  }
+}
+
+// ─── Title Screen ───────────────────────────────────
+function drawTitleScreen() {
+  drawWater();
+  drawLilyPad(W / 2, H / 2 + 16, 18);
+  drawLilyPad(40, 140, 12);
+  drawLilyPad(155, 135, 13);
+  drawLilyPad(60, 50, 10);
+  drawLilyPad(140, 60, 11);
+
+  const frogDef = FROGS[save.selectedFrog];
+  drawSprite(remapSprite(FROG, frogDef.colorMap), W / 2 - 6, H / 2 + 6);
+
+  ctx.fillStyle = P[3];
+  ctx.font = `8px ${F}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('FROG', W / 2, 24);
+  ctx.fillText('POND', W / 2, 38);
+
+  ctx.fillStyle = P[4];
+  ctx.font = `4px ${F}`;
+  ctx.fillText('LV' + save.level + ' ' + frogDef.name, W / 2, 52);
+
+  if (save.skillPoints > 0) {
+    ctx.fillStyle = P[10];
+    ctx.font = `4px ${F}`;
+    ctx.fillText(save.skillPoints + ' SP READY!', W / 2, H - 48);
+  }
+
+  const blink = Math.floor(state.time / 500) % 2 === 0;
+  if (blink) {
+    ctx.fillStyle = P[10];
+    ctx.font = `5px ${F}`;
+    ctx.fillText('PRESS SPACE', W / 2, H - 30);
+  }
+  ctx.fillStyle = '#ffffff55';
+  ctx.font = `4px ${F}`;
+  ctx.fillText('ESC = UPGRADES', W / 2, H - 14);
+}
+
+// ─── Input ──────────────────────────────────────────
+const KEYS = {
+  ArrowUp: 'up', KeyW: 'up',
+  ArrowDown: 'down', KeyS: 'down',
+  ArrowLeft: 'left', KeyA: 'left',
+  ArrowRight: 'right', KeyD: 'right',
+};
+
+document.addEventListener('keydown', (e) => {
+  // ─ Title ─
+  if (state.screen === 'title') {
+    if (e.code === 'Space' || e.code === 'Enter') startGame();
+    if (e.code === 'Escape' || e.code === 'KeyU') {
+      state.prevScreen = 'title';
+      enterUpgrades();
+    }
+    return;
+  }
+
+  // ─ Upgrades ─
+  if (state.screen === 'upgrades') {
+    if (e.code === 'ArrowUp' || e.code === 'KeyW') { e.preventDefault(); menuMove(-1); }
+    if (e.code === 'ArrowDown' || e.code === 'KeyS') { e.preventDefault(); menuMove(1); }
+    if (e.code === 'Space' || e.code === 'Enter') menuSelect();
+    if (e.code === 'Escape') state.screen = state.prevScreen;
+    return;
+  }
+
+  // ─ Paused ─
+  if (state.screen === 'paused') {
+    if (e.code === 'ArrowUp' || e.code === 'KeyW') {
+      e.preventDefault();
+      state.pauseCursor = (state.pauseCursor - 1 + PAUSE_ITEMS.length) % PAUSE_ITEMS.length;
+    }
+    if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+      e.preventDefault();
+      state.pauseCursor = (state.pauseCursor + 1) % PAUSE_ITEMS.length;
+    }
+    if (e.code === 'Space' || e.code === 'Enter') pauseSelect();
+    if (e.code === 'Escape') state.screen = 'playing';
+    return;
+  }
+
+  // ─ Playing ─
+  if (state.screen !== 'playing') return;
+  if (e.code === 'Escape') {
+    state.screen = 'paused';
+    state.pauseCursor = 0;
+    return;
+  }
+  if (state.frog.jumping) return;
+  const dir = KEYS[e.code];
+  if (!dir) return;
+  e.preventDefault();
+  const t = findTargetPad(dir);
+  if (t >= 0) {
+    state.frog.target = t;
+    state.frog.jumping = true;
+    state.frog.jumpStart = state.time;
+  }
+});
+
+// ─── Start / Loop ───────────────────────────────────
+function enterUpgrades() {
+  state.screen = 'upgrades';
+  state.menuItems = buildMenu();
+  state.menuCursor = state.menuItems.findIndex(i => i.selectable);
+}
+
+function startGame() {
+  state.screen = 'playing';
+  state.score = 0;
+  state.flash = 0;
+  state.levelUp = 0;
+  state.pads = generateWorld();
+  state.currentSection = 0;
+  // Find center pad of section 0 (CENTER)
+  state.frog.pad = state.pads.findIndex(p => p.section === 0);
+  state.frog.jumping = false;
+  state.lastSpawn = 0;
+  // Snap camera to CENTER section
+  const sec = SECTIONS[0];
+  cam.x = cam.tx = sec.wx;
+  cam.y = cam.ty = sec.wy;
+  state.sectionName = 'CENTER';
+  state.sectionLabel = 60;
+  state.visitedSections = new Set([0]);
+}
+
+function gameLoop(ts) {
+  state.time = ts;
+  if (state.screen === 'title') drawTitleScreen();
+  else if (state.screen === 'playing') { update(ts); draw(); }
+  else if (state.screen === 'paused') drawPauseMenu();
+  else if (state.screen === 'upgrades') drawUpgradeScreen();
+  requestAnimationFrame(gameLoop);
+}
+
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>
