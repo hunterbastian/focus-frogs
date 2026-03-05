@@ -48,9 +48,12 @@ const CONFIG = {
 };
 
 const LIGHT = {
-  waterHighlight: '#3a8cc7',
-  waterHighlight2: '#5aa8d7',
-  specular: '#c8ddf0',
+  waterHighlight: '#4a90b8',
+  waterHighlight2: '#7ab8d0',
+  waterWarm: '#c8a860',
+  specular: '#f0e8c8',
+  glow: 'rgba(255,220,140,',
+  glowFrog: 'rgba(255,210,120,',
 };
 
 // ─── Palette ────────────────────────────────────────
@@ -356,10 +359,29 @@ function drawWater() {
       ctx.fillRect(sx + 1, sy, 1, 1);
     }
   }
+  // Warm golden sparkles — Stardew-style warm light on water
+  ctx.fillStyle = LIGHT.waterWarm;
+  for (let i = 0; i < 12; i++) {
+    const sx = Math.floor((Math.sin(i * 9.7 + phase * 0.9) * 0.5 + 0.5) * W);
+    const sy = Math.floor((Math.cos(i * 5.3 + phase * 1.4) * 0.5 + 0.5) * H);
+    if (Math.sin((sy + phase * 40) * 0.12) > 0.4) {
+      ctx.fillRect(sx, sy, 1, 1);
+    }
+  }
 }
 
 function drawLilyPad(x, y, r, isBridge) {
   x = Math.floor(x); y = Math.floor(y);
+  // Warm glow halo — Stardew-style ambient light pool on water
+  const gr = r + 6;
+  for (let dy = -gr; dy <= gr; dy += 2) {
+    const gw = Math.floor(Math.sqrt(gr * gr - dy * dy));
+    const dist = Math.abs(dy) / gr;
+    const a = 0.04 * (1 - dist);
+    if (a < 0.005) continue;
+    ctx.fillStyle = `${LIGHT.glow}${a})`;
+    ctx.fillRect(x - gw, y + dy, gw * 2, 2);
+  }
   const cTop = isBridge ? P[4] : P[3];
   const cBot = isBridge ? P[3] : P[2];
   for (let dy = -r; dy <= r; dy++) {
@@ -414,6 +436,16 @@ function drawFrog() {
     wx = pad.x; wy = pad.y;
   }
   const sx = wx - cam.x, sy = wy - cam.y;
+  // Player glow — warm light pool around the frog
+  const glr = 20;
+  for (let dy = -glr; dy <= glr; dy += 2) {
+    const gw = Math.floor(Math.sqrt(glr * glr - dy * dy));
+    const dist = Math.sqrt(dy * dy) / glr;
+    const a = 0.06 * (1 - dist * dist);
+    if (a < 0.005) continue;
+    ctx.fillStyle = `${LIGHT.glowFrog}${a})`;
+    ctx.fillRect(Math.floor(sx) - gw, Math.floor(sy) + dy, gw * 2, 2);
+  }
   const frogDef = FROGS[save.selectedFrog];
   const sprite = remapSprite(f.jumping ? FROG_JUMP : FROG, frogDef.colorMap);
   const offX = -Math.floor(sprite[0].length / 2);
@@ -679,7 +711,7 @@ function updateAtmosphere() {
 }
 
 function drawColorGrade() {
-  ctx.fillStyle = 'rgba(60,50,100,0.06)';
+  ctx.fillStyle = 'rgba(80,60,40,0.04)';
   ctx.fillRect(0, 0, W, H);
 }
 
@@ -687,7 +719,7 @@ function drawFogOverlay() {
   state.atmosphere.fogPatches.forEach(f => {
     const pulse = 0.6 + 0.4 * Math.sin(f.phase);
     const a = f.alpha * pulse;
-    ctx.fillStyle = `rgba(180,190,210,${a})`;
+    ctx.fillStyle = `rgba(200,190,160,${a})`;
     const cx = Math.floor(f.x), cy = Math.floor(f.y);
     const hw = Math.floor(f.w / 2), hh = Math.floor(f.h / 2);
     ctx.fillRect(cx - hw + 4, cy - hh, f.w - 8, 3);
@@ -706,9 +738,9 @@ function drawParticles() {
     const flicker = 0.5 + 0.5 * Math.sin(state.time * 0.002 + p.phase * 10);
     const a = p.alpha * flicker;
     if (a < 0.05) return;
-    if (p.hue === 0) ctx.fillStyle = `rgba(220,220,230,${a})`;
-    else if (p.hue === 1) ctx.fillStyle = `rgba(140,160,200,${a})`;
-    else ctx.fillStyle = `rgba(200,210,140,${a})`;
+    if (p.hue === 0) ctx.fillStyle = `rgba(255,240,180,${a})`;
+    else if (p.hue === 1) ctx.fillStyle = `rgba(220,200,140,${a})`;
+    else ctx.fillStyle = `rgba(180,255,140,${a})`;
     ctx.fillRect(Math.floor(p.x), Math.floor(p.y), p.size, p.size);
   });
 }
