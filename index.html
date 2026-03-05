@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Frog Pond</title>
-  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;700&display=swap" rel="stylesheet">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body {
@@ -37,7 +37,7 @@
 <script>
 // ─── Config ─────────────────────────────────────────
 const W = 192, H = 192;
-const F = "'Press Start 2P', monospace";
+const F = "'Geist Mono', monospace";
 const CONFIG = {
   PAD_RADIUS: 14,
   JUMP_DURATION: 280,
@@ -45,6 +45,12 @@ const CONFIG = {
   FRUIT_SPAWN_MS: 3000,
   MAX_FRUIT: 6,
   AIM_CONE: Math.PI / 3,
+};
+
+const LIGHT = {
+  waterHighlight: '#3a8cc7',
+  waterHighlight2: '#5aa8d7',
+  specular: '#c8ddf0',
 };
 
 // ─── Palette ────────────────────────────────────────
@@ -202,6 +208,7 @@ const state = {
   menuCursor: 0,
   menuItems: [],
   pauseCursor: 0,
+  atmosphere: { fogPatches: [], particles: [], vignetteGrad: null },
 };
 
 // ─── Canvas ─────────────────────────────────────────
@@ -329,6 +336,26 @@ function drawWater() {
     ctx.fillStyle = P[15];
     ctx.fillRect(0, y + Math.floor(off), W, 1);
   }
+  // Water shimmer — moonlight reflection points
+  const phase = state.waterPhase;
+  ctx.fillStyle = LIGHT.waterHighlight;
+  for (let i = 0; i < 35; i++) {
+    const sx = Math.floor((Math.sin(i * 7.3 + phase * 1.2) * 0.5 + 0.5) * W);
+    const sy = Math.floor((Math.sin(i * 13.7 + phase * 0.8) * 0.5 + 0.5) * H);
+    if (Math.sin((sy + phase * 40) * 0.12) > 0.3) {
+      ctx.fillRect(sx, sy, 1, 1);
+    }
+  }
+  // Rare bright sparkles (fewer, wider)
+  ctx.fillStyle = LIGHT.waterHighlight2;
+  for (let i = 0; i < 8; i++) {
+    const sx = Math.floor((Math.sin(i * 11.1 + phase * 1.7) * 0.5 + 0.5) * W);
+    const sy = Math.floor((Math.sin(i * 17.3 + phase * 1.1) * 0.5 + 0.5) * H);
+    if (Math.sin((sy + phase * 40) * 0.12) > 0.5) {
+      ctx.fillRect(sx, sy, 1, 1);
+      ctx.fillRect(sx + 1, sy, 1, 1);
+    }
+  }
 }
 
 function drawLilyPad(x, y, r, isBridge) {
@@ -347,6 +374,19 @@ function drawLilyPad(x, y, r, isBridge) {
     const nw = Math.max(1, Math.floor(i * 0.4));
     ctx.fillRect(x - nw, y - r + i, nw * 2, 1);
   }
+  // Specular highlight — moonlight glint on upper-left
+  ctx.fillStyle = LIGHT.specular;
+  const specX = x - Math.floor(r * 0.35);
+  const specY = y - Math.floor(r * 0.45);
+  ctx.fillRect(specX, specY, 2, 1);
+  ctx.fillRect(specX, specY + 1, 1, 1);
+  // Bounce light — water reflection on bottom-right rim
+  ctx.fillStyle = LIGHT.waterHighlight;
+  for (let dy = Math.floor(r * 0.5); dy <= r; dy++) {
+    const w = Math.floor(Math.sqrt(r * r - dy * dy));
+    const rimW = Math.min(2, w);
+    ctx.fillRect(x + w - rimW, y + dy, rimW, 1);
+  }
 }
 
 function drawFruitOnPad(pad) {
@@ -356,6 +396,12 @@ function drawFruitOnPad(pad) {
   const bob = Math.sin(state.time * 0.004) * 1.5;
   const sx = pad.x - cam.x, sy = pad.y - cam.y;
   drawSprite(sprite, sx - 3, sy - CONFIG.PAD_RADIUS - 4 + bob);
+  // Fruit specular highlight + shadow accent
+  const fx = Math.floor(sx - 3), fy = Math.floor(sy - CONFIG.PAD_RADIUS - 4 + bob);
+  ctx.fillStyle = LIGHT.specular;
+  ctx.fillRect(fx + 1, fy + 1, 1, 1);
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.fillRect(fx + 4, fy + 4, 1, 1);
 }
 
 function drawFrog() {
@@ -373,6 +419,14 @@ function drawFrog() {
   const offX = -Math.floor(sprite[0].length / 2);
   const offY = -sprite.length + 2;
   drawSprite(sprite, sx + offX, sy + offY);
+  // Frog specular highlights + shadow
+  const fsx = Math.floor(sx + offX), fsy = Math.floor(sy + offY);
+  ctx.fillStyle = LIGHT.specular;
+  ctx.fillRect(fsx + 2, fsy + 2, 1, 1);
+  ctx.fillRect(fsx + 3, fsy + 3, 1, 1);
+  ctx.fillStyle = 'rgba(0,0,0,0.15)';
+  ctx.fillRect(fsx + 9, fsy + 7, 1, 1);
+  ctx.fillRect(fsx + 8, fsy + 8, 1, 1);
 }
 
 function drawHUD() {
@@ -398,15 +452,15 @@ function drawHUD() {
   // XP bar (bottom)
   const needed = xpForLevel(save.level);
   const pct = Math.min(save.xp / needed, 1);
-  ctx.fillStyle = '#00000077';
-  ctx.fillRect(0, H - 5, W, 5);
+  ctx.fillStyle = '#00000088';
+  ctx.fillRect(0, H - 7, W, 7);
   ctx.fillStyle = P[3];
-  ctx.fillRect(1, H - 4, Math.floor((W - 2) * pct), 3);
-  ctx.fillStyle = '#ffffff77';
-  ctx.font = `4px ${F}`;
+  ctx.fillRect(1, H - 6, Math.floor((W - 2) * pct), 3);
+  ctx.fillStyle = '#ffffffbb';
+  ctx.font = `5px ${F}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
-  ctx.fillText(save.xp + '/' + needed + 'XP', W / 2, H - 6);
+  ctx.fillText(save.xp + '/' + needed + 'XP', W / 2, H - 7);
 
   // Pause button (touch only)
   if (hasTouchInput) {
@@ -545,32 +599,125 @@ function drawLevelUp() {
   const alpha = Math.min(state.levelUp / 30, 1);
   const yOff = (1 - alpha) * -8;
   ctx.fillStyle = `rgba(99,199,77,${alpha})`;
-  ctx.font = `7px ${F}`;
+  ctx.font = `8px ${F}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText('LEVEL UP!', W / 2, H / 2 - 30 + yOff);
-  ctx.fillStyle = `rgba(255,255,255,${alpha * 0.8})`;
-  ctx.font = `4px ${F}`;
-  ctx.fillText('LV ' + save.level + '  +1 SP', W / 2, H / 2 - 18 + yOff);
+  ctx.fillStyle = `rgba(255,255,255,${alpha * 0.9})`;
+  ctx.font = `5px ${F}`;
+  ctx.fillText('LV ' + save.level + '  +1 SP', W / 2, H / 2 - 17 + yOff);
   state.levelUp -= 0.8;
 }
 
 function drawSectionLabel() {
   if (state.sectionLabel <= 0) return;
   // Hold fully opaque for first 20 frames, then fade
-  const alpha = state.sectionLabel > 40 ? 0.85 : (state.sectionLabel / 40) * 0.85;
+  const alpha = state.sectionLabel > 40 ? 0.9 : (state.sectionLabel / 40) * 0.9;
   const text = '~ ' + state.sectionName + ' ~';
-  ctx.font = `6px ${F}`;
+  ctx.font = `7px ${F}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
   // Dark background pill
   const tw = ctx.measureText(text).width;
-  ctx.fillStyle = `rgba(0,0,0,${alpha * 0.6})`;
-  ctx.fillRect(W / 2 - tw / 2 - 4, 12, tw + 8, 12);
+  ctx.fillStyle = `rgba(0,0,0,${alpha * 0.7})`;
+  ctx.fillRect(W / 2 - tw / 2 - 5, 11, tw + 10, 14);
   // Text
   ctx.fillStyle = `rgba(255,255,255,${alpha})`;
-  ctx.fillText(text, W / 2, 14);
+  ctx.fillText(text, W / 2, 13);
   state.sectionLabel -= 0.6;
+}
+
+// ─── Atmosphere ─────────────────────────────────────
+function initAtmosphere() {
+  const atm = state.atmosphere;
+  atm.fogPatches = [];
+  for (let i = 0; i < 7; i++) {
+    atm.fogPatches.push({
+      x: Math.random() * W, y: Math.random() * H,
+      w: 40 + Math.random() * 40, h: 20 + Math.random() * 20,
+      speedX: 0.05 + Math.random() * 0.1,
+      speedY: 0.01 + Math.random() * 0.04,
+      alpha: 0.03 + Math.random() * 0.04,
+      phase: Math.random() * Math.PI * 2,
+    });
+  }
+  atm.particles = [];
+  for (let i = 0; i < 20; i++) {
+    const x = Math.random() * W;
+    atm.particles.push({
+      x, y: Math.random() * H, baseX: x,
+      size: Math.random() < 0.7 ? 1 : 2,
+      alpha: 0.15 + Math.random() * 0.25,
+      speedY: -(0.1 + Math.random() * 0.2),
+      freqX: 0.005 + Math.random() * 0.01,
+      ampX: 3 + Math.random() * 5,
+      phase: Math.random() * Math.PI * 2,
+      hue: Math.floor(Math.random() * 3),
+    });
+  }
+  atm.vignetteGrad = ctx.createRadialGradient(W / 2, H / 2, 30, W / 2, H / 2, 120);
+  atm.vignetteGrad.addColorStop(0, 'rgba(0,0,0,0)');
+  atm.vignetteGrad.addColorStop(0.6, 'rgba(0,0,0,0)');
+  atm.vignetteGrad.addColorStop(0.85, 'rgba(0,0,0,0.25)');
+  atm.vignetteGrad.addColorStop(1, 'rgba(0,0,0,0.55)');
+}
+
+function updateAtmosphere() {
+  state.atmosphere.fogPatches.forEach(f => {
+    f.x += f.speedX; f.y += f.speedY; f.phase += 0.008;
+    if (f.x > W + 20) f.x = -f.w;
+    if (f.y > H + 10) f.y = -f.h;
+  });
+  state.atmosphere.particles.forEach(p => {
+    p.y += p.speedY;
+    p.phase += p.freqX;
+    p.x = p.baseX + Math.sin(p.phase) * p.ampX;
+    if (p.y < -5) { p.y = H + 5; p.baseX = Math.random() * W; p.x = p.baseX; }
+    if (p.x < -10) p.baseX += W + 20;
+    if (p.x > W + 10) p.baseX -= W + 20;
+  });
+}
+
+function drawColorGrade() {
+  ctx.fillStyle = 'rgba(60,50,100,0.06)';
+  ctx.fillRect(0, 0, W, H);
+}
+
+function drawFogOverlay() {
+  state.atmosphere.fogPatches.forEach(f => {
+    const pulse = 0.6 + 0.4 * Math.sin(f.phase);
+    const a = f.alpha * pulse;
+    ctx.fillStyle = `rgba(180,190,210,${a})`;
+    const cx = Math.floor(f.x), cy = Math.floor(f.y);
+    const hw = Math.floor(f.w / 2), hh = Math.floor(f.h / 2);
+    ctx.fillRect(cx - hw + 4, cy - hh, f.w - 8, 3);
+    ctx.fillRect(cx - hw, cy - hh + 3, f.w, f.h - 6);
+    ctx.fillRect(cx - hw + 4, cy + hh - 3, f.w - 8, 3);
+  });
+}
+
+function drawVignette() {
+  ctx.fillStyle = state.atmosphere.vignetteGrad;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function drawParticles() {
+  state.atmosphere.particles.forEach(p => {
+    const flicker = 0.5 + 0.5 * Math.sin(state.time * 0.002 + p.phase * 10);
+    const a = p.alpha * flicker;
+    if (a < 0.05) return;
+    if (p.hue === 0) ctx.fillStyle = `rgba(220,220,230,${a})`;
+    else if (p.hue === 1) ctx.fillStyle = `rgba(140,160,200,${a})`;
+    else ctx.fillStyle = `rgba(200,210,140,${a})`;
+    ctx.fillRect(Math.floor(p.x), Math.floor(p.y), p.size, p.size);
+  });
+}
+
+function drawAtmosphere() {
+  drawColorGrade();
+  drawFogOverlay();
+  drawVignette();
+  drawParticles();
 }
 
 // ─── Game Logic ─────────────────────────────────────
@@ -691,6 +838,7 @@ function draw() {
     drawFruitOnPad(pad);
   });
   drawFrog();
+  drawAtmosphere();
   drawFlash();
   drawLevelUp();
   drawSectionLabel();
@@ -762,6 +910,7 @@ function menuSelect() {
 
 function drawUpgradeScreen() {
   drawWater();
+  drawAtmosphere();
   ctx.fillStyle = '#000000aa';
   ctx.fillRect(0, 0, W, H);
 
@@ -772,7 +921,7 @@ function drawUpgradeScreen() {
   ctx.fillText('UPGRADES', W / 2, 6);
 
   ctx.fillStyle = P[10];
-  ctx.font = `4px ${F}`;
+  ctx.font = `5px ${F}`;
   ctx.fillText('SKILL PTS: ' + save.skillPoints, W / 2, 18);
 
   let y = 28;
@@ -783,7 +932,7 @@ function drawUpgradeScreen() {
 
     if (item.type === 'header') {
       ctx.fillStyle = P[15];
-      ctx.font = `4px ${F}`;
+      ctx.font = `5px ${F}`;
       ctx.textAlign = 'center';
       ctx.fillText(item.text, W / 2, y);
       y += 10;
@@ -791,10 +940,10 @@ function drawUpgradeScreen() {
     }
 
     if (sel) {
-      ctx.fillStyle = '#ffffff15';
+      ctx.fillStyle = '#ffffff18';
       ctx.fillRect(6, y - 1, W - 12, 10);
       ctx.fillStyle = P[10];
-      ctx.font = `4px ${F}`;
+      ctx.font = `5px ${F}`;
       ctx.textAlign = 'left';
       ctx.fillText('>', 8, y);
     }
@@ -805,8 +954,8 @@ function drawUpgradeScreen() {
       ctx.fillRect(16, y + 1, 4, 4);
     }
 
-    ctx.fillStyle = item.owned ? '#888888' : '#ffffff';
-    ctx.font = `4px ${F}`;
+    ctx.fillStyle = item.owned ? '#999999' : '#ffffff';
+    ctx.font = `5px ${F}`;
     ctx.textAlign = 'left';
     ctx.fillText(item.name, item.type === 'frog' ? 22 : 16, y);
 
@@ -815,7 +964,7 @@ function drawUpgradeScreen() {
       ctx.fillStyle = P[3];
       ctx.fillText('USE', W - 10, y);
     } else if (item.owned) {
-      ctx.fillStyle = '#555555';
+      ctx.fillStyle = '#777777';
       ctx.fillText('OWN', W - 10, y);
     } else {
       ctx.fillStyle = save.skillPoints >= item.cost ? P[10] : '#e43b44';
@@ -824,14 +973,14 @@ function drawUpgradeScreen() {
     y += 11;
   }
 
-  ctx.fillStyle = '#ffffff44';
-  ctx.font = `3px ${F}`;
+  ctx.fillStyle = '#ffffff66';
+  ctx.font = `4px ${F}`;
   ctx.textAlign = 'center';
   ctx.fillText(hasTouchInput ? 'TAP ITEM · TOP:BACK' : 'UP/DN:MOVE SPC:BUY ESC:BACK', W / 2, H - 6);
 
   if (hasTouchInput) {
-    ctx.fillStyle = '#ffffff88';
-    ctx.font = `4px ${F}`;
+    ctx.fillStyle = '#ffffffaa';
+    ctx.font = `5px ${F}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillText('< BACK', 4, 8);
@@ -850,6 +999,7 @@ function drawPauseMenu() {
     drawFruitOnPad(pad);
   });
   drawFrog();
+  drawAtmosphere();
 
   // Dim overlay
   ctx.fillStyle = '#000000bb';
@@ -863,8 +1013,8 @@ function drawPauseMenu() {
   ctx.fillText('PAUSED', W / 2, 40);
 
   // Stats
-  ctx.fillStyle = '#ffffff77';
-  ctx.font = `4px ${F}`;
+  ctx.fillStyle = '#ffffffaa';
+  ctx.font = `5px ${F}`;
   ctx.fillText('LV' + save.level + '  ' + state.score + 'PTS  ' + save.skillPoints + 'SP', W / 2, 56);
 
   // Menu items
@@ -873,20 +1023,20 @@ function drawPauseMenu() {
     const sel = i === state.pauseCursor;
 
     if (sel) {
-      ctx.fillStyle = '#ffffff11';
-      ctx.fillRect(W / 2 - 50, y - 5, 100, 14);
+      ctx.fillStyle = '#ffffff18';
+      ctx.fillRect(W / 2 - 55, y - 6, 110, 16);
     }
 
-    ctx.fillStyle = sel ? P[10] : '#ffffff88';
-    ctx.font = `5px ${F}`;
+    ctx.fillStyle = sel ? P[10] : '#ffffffbb';
+    ctx.font = `6px ${F}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText((sel ? '> ' : '  ') + label + (sel ? ' <' : ''), W / 2, y);
   });
 
   // Footer
-  ctx.fillStyle = '#ffffff33';
-  ctx.font = `3px ${F}`;
+  ctx.fillStyle = '#ffffff66';
+  ctx.font = `4px ${F}`;
   ctx.fillText(hasTouchInput ? 'TAP TO SELECT' : 'ESC:RESUME', W / 2, H - 10);
 }
 
@@ -913,6 +1063,7 @@ function drawTitleScreen() {
 
   const frogDef = FROGS[save.selectedFrog];
   drawSprite(remapSprite(FROG, frogDef.colorMap), W / 2 - 6, H / 2 + 6);
+  drawAtmosphere();
 
   ctx.fillStyle = P[3];
   ctx.font = `8px ${F}`;
@@ -922,23 +1073,23 @@ function drawTitleScreen() {
   ctx.fillText('POND', W / 2, 38);
 
   ctx.fillStyle = P[4];
-  ctx.font = `4px ${F}`;
+  ctx.font = `5px ${F}`;
   ctx.fillText('LV' + save.level + ' ' + frogDef.name, W / 2, 52);
 
   if (save.skillPoints > 0) {
     ctx.fillStyle = P[10];
-    ctx.font = `4px ${F}`;
+    ctx.font = `5px ${F}`;
     ctx.fillText(save.skillPoints + ' SP READY!', W / 2, H - 48);
   }
 
   const blink = Math.floor(state.time / 500) % 2 === 0;
   if (blink) {
     ctx.fillStyle = P[10];
-    ctx.font = `5px ${F}`;
+    ctx.font = `6px ${F}`;
     ctx.fillText(hasTouchInput ? 'TAP TO START' : 'PRESS SPACE', W / 2, H - 30);
   }
-  ctx.fillStyle = '#ffffff55';
-  ctx.font = `4px ${F}`;
+  ctx.fillStyle = '#ffffff88';
+  ctx.font = `5px ${F}`;
   ctx.fillText(hasTouchInput ? 'TAP HERE: UPGRADES' : 'ESC = UPGRADES', W / 2, H - 14);
 }
 
@@ -1091,10 +1242,12 @@ function startGame() {
   state.sectionName = 'CENTER';
   state.sectionLabel = 60;
   state.visitedSections = new Set([0]);
+  initAtmosphere();
 }
 
 function gameLoop(ts) {
   state.time = ts;
+  if (state.atmosphere.fogPatches.length) updateAtmosphere();
   if (state.screen === 'title') drawTitleScreen();
   else if (state.screen === 'playing') { update(ts); draw(); }
   else if (state.screen === 'paused') drawPauseMenu();
@@ -1102,6 +1255,7 @@ function gameLoop(ts) {
   requestAnimationFrame(gameLoop);
 }
 
+initAtmosphere();
 requestAnimationFrame(gameLoop);
 </script>
 </body>
