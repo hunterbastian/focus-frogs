@@ -35,6 +35,88 @@
 <body>
 <canvas id="pond" width="192" height="192"></canvas>
 <script>
+// ─── Audio ──────────────────────────────────────────
+let audioCtx = null;
+function initAudio() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+function playSound(type) {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  const g = audioCtx.createGain();
+  g.connect(audioCtx.destination);
+
+  if (type === 'jump') {
+    const o = audioCtx.createOscillator();
+    o.type = 'square'; o.frequency.setValueAtTime(220, t);
+    o.frequency.exponentialRampToValueAtTime(520, t + 0.08);
+    g.gain.setValueAtTime(0.08, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+    o.connect(g); o.start(t); o.stop(t + 0.1);
+
+  } else if (type === 'land') {
+    const o = audioCtx.createOscillator();
+    o.type = 'sine'; o.frequency.setValueAtTime(120, t);
+    o.frequency.exponentialRampToValueAtTime(60, t + 0.06);
+    g.gain.setValueAtTime(0.06, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+    o.connect(g); o.start(t); o.stop(t + 0.08);
+
+  } else if (type === 'collect' || type === 'collect_orange' || type === 'collect_cherry') {
+    const base = type === 'collect_cherry' ? 880 : type === 'collect_orange' ? 740 : 620;
+    const o = audioCtx.createOscillator();
+    o.type = 'sine'; o.frequency.setValueAtTime(base, t);
+    o.frequency.exponentialRampToValueAtTime(base * 1.5, t + 0.1);
+    g.gain.setValueAtTime(0.1, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+    o.connect(g); o.start(t); o.stop(t + 0.15);
+
+  } else if (type === 'levelup') {
+    [440, 554, 659].forEach((freq, i) => {
+      const o = audioCtx.createOscillator();
+      const ng = audioCtx.createGain();
+      o.type = 'sine'; o.frequency.setValueAtTime(freq, t + i * 0.1);
+      ng.gain.setValueAtTime(0.1, t + i * 0.1);
+      ng.gain.exponentialRampToValueAtTime(0.001, t + i * 0.1 + 0.2);
+      o.connect(ng); ng.connect(audioCtx.destination);
+      o.start(t + i * 0.1); o.stop(t + i * 0.1 + 0.2);
+    });
+
+  } else if (type === 'poison') {
+    // Dissonant low buzz — two detuned oscillators
+    [80, 93].forEach(freq => {
+      const o = audioCtx.createOscillator();
+      const ng = audioCtx.createGain();
+      o.type = 'sawtooth'; o.frequency.setValueAtTime(freq, t);
+      ng.gain.setValueAtTime(0.07, t);
+      ng.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+      o.connect(ng); ng.connect(audioCtx.destination);
+      o.start(t); o.stop(t + 0.25);
+    });
+
+  } else if (type === 'stunEnd') {
+    const o = audioCtx.createOscillator();
+    o.type = 'triangle'; o.frequency.setValueAtTime(300, t);
+    o.frequency.exponentialRampToValueAtTime(550, t + 0.08);
+    g.gain.setValueAtTime(0.08, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+    o.connect(g); o.start(t); o.stop(t + 0.1);
+
+  } else if (type === 'achievement') {
+    // Sparkly ascending chime — 4 quick notes
+    [660, 880, 1100, 1320].forEach((freq, i) => {
+      const o = audioCtx.createOscillator();
+      const ng = audioCtx.createGain();
+      o.type = 'sine'; o.frequency.setValueAtTime(freq, t + i * 0.07);
+      ng.gain.setValueAtTime(0.08, t + i * 0.07);
+      ng.gain.exponentialRampToValueAtTime(0.001, t + i * 0.07 + 0.15);
+      o.connect(ng); ng.connect(audioCtx.destination);
+      o.start(t + i * 0.07); o.stop(t + i * 0.07 + 0.15);
+    });
+  }
+}
+
 // ─── Config ─────────────────────────────────────────
 const W = 192, H = 192;
 const F = "'Geist Mono', monospace";
@@ -54,6 +136,7 @@ const LIGHT = {
   specular: '#f0e8c8',
   glow: 'rgba(255,220,140,',
   glowFrog: 'rgba(255,210,120,',
+  glowPoison: 'rgba(140,60,200,',
 };
 
 // ─── Palette ────────────────────────────────────────
@@ -72,6 +155,8 @@ const P = {
   26: '#4b4b5b', 27: '#6b6b7b', 28: '#9b9bab', 29: '#d0d0e0', 30: '#f0f0ff',
   // Gold frog
   31: '#6b4f0e', 32: '#8b6914', 33: '#c9a01c', 34: '#ffd700', 35: '#fff44f',
+  // Poison pad
+  36: '#3a1f4a', 37: '#5c2d82', 38: '#7a3ea6',
 };
 
 // ─── Sections (world layout) ────────────────────────
@@ -155,6 +240,20 @@ const UPGRADES = [
   { id: 'plenty',   name: 'PLENTY',     desc: '+2 max fruit',        cost: 1, cat: 'fruit' },
 ];
 
+// ─── Achievements ──────────────────────────────────
+const ACHIEVEMENTS = [
+  { id: 'first_bite',    name: 'FIRST BITE',    desc: 'Collect your first fruit',  check: s => s.totalFruit >= 1 },
+  { id: 'apple_10',      name: 'APPLE PICKER',  desc: 'Collect 10 apples',         check: s => s.apples >= 10 },
+  { id: 'orange_10',     name: 'CITRUS LOVER',  desc: 'Collect 10 oranges',        check: s => s.oranges >= 10 },
+  { id: 'cherry_10',     name: 'CHERRY CHASER', desc: 'Collect 10 cherries',       check: s => s.cherries >= 10 },
+  { id: 'explorer',      name: 'EXPLORER',      desc: 'Visit all 5 sections',      check: (s, st) => st.visitedSections && st.visitedSections.size >= 5 },
+  { id: 'collector_50',  name: 'COLLECTOR',     desc: 'Collect 50 fruit',          check: s => s.totalFruit >= 50 },
+  { id: 'collector_200', name: 'HOARDER',       desc: 'Collect 200 fruit',         check: s => s.totalFruit >= 200 },
+  { id: 'survivor_5',    name: 'TOUGH SKIN',    desc: 'Survive 5 poison pads',     check: s => s.poisonLands >= 5 },
+  { id: 'level_5',       name: 'GROWING UP',    desc: 'Reach level 5',             check: (s, st, sv) => sv.level >= 5 },
+  { id: 'level_10',      name: 'VETERAN',       desc: 'Reach level 10',            check: (s, st, sv) => sv.level >= 10 },
+];
+
 // ─── Save System ────────────────────────────────────
 const SAVE_KEY = 'frogpond';
 function loadSave() {
@@ -168,10 +267,13 @@ function loadSave() {
         selectedFrog: s.selectedFrog || 0,
         unlocked: s.unlocked || [0],
         upgrades: s.upgrades || [],
+        stats: s.stats || { totalFruit: 0, apples: 0, oranges: 0, cherries: 0, poisonLands: 0 },
+        achievements: s.achievements || [],
       };
     }
   } catch(e) {}
-  return { level: 1, xp: 0, skillPoints: 0, selectedFrog: 0, unlocked: [0], upgrades: [] };
+  return { level: 1, xp: 0, skillPoints: 0, selectedFrog: 0, unlocked: [0], upgrades: [],
+    stats: { totalFruit: 0, apples: 0, oranges: 0, cherries: 0, poisonLands: 0 }, achievements: [] };
 }
 function writeSave() { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); }
 const save = loadSave();
@@ -198,7 +300,8 @@ const state = {
   screen: 'title', // 'title' | 'playing' | 'paused' | 'upgrades'
   prevScreen: 'title', // where to return from upgrades
   score: 0,
-  frog: { pad: 0, target: null, jumpStart: 0, jumping: false, drawX: 0, drawY: 0 },
+  frog: { pad: 0, target: null, jumpStart: 0, jumping: false, drawX: 0, drawY: 0, stunned: false, stunEnd: 0 },
+  screenShake: 0,
   pads: [],
   currentSection: 0,
   lastSpawn: 0,
@@ -212,6 +315,7 @@ const state = {
   menuItems: [],
   pauseCursor: 0,
   atmosphere: { fogPatches: [], particles: [], vignetteGrad: null },
+  achievementToast: null, // { name, desc, timer }
 };
 
 // ─── Canvas ─────────────────────────────────────────
@@ -310,6 +414,14 @@ function generateWorld() {
     }
   });
 
+  // Mark ~18% of interior (non-bridge, non-spawn) pads as poisonous
+  pads.forEach((pad, i) => {
+    pad.isPoisoned = false;
+    if (i === 0) return;            // never poison spawn pad
+    if (pad.isBridge) return;       // never poison bridge pads
+    if (Math.random() < 0.18) pad.isPoisoned = true;
+  });
+
   return pads;
 }
 
@@ -370,20 +482,21 @@ function drawWater() {
   }
 }
 
-function drawLilyPad(x, y, r, isBridge) {
+function drawLilyPad(x, y, r, isBridge, isPoisoned) {
   x = Math.floor(x); y = Math.floor(y);
-  // Warm glow halo — Stardew-style ambient light pool on water
+  // Glow halo — warm for normal, purple for poison
+  const glowColor = isPoisoned ? LIGHT.glowPoison : LIGHT.glow;
   const gr = r + 6;
   for (let dy = -gr; dy <= gr; dy += 2) {
     const gw = Math.floor(Math.sqrt(gr * gr - dy * dy));
     const dist = Math.abs(dy) / gr;
-    const a = 0.04 * (1 - dist);
+    const a = (isPoisoned ? 0.06 : 0.04) * (1 - dist);
     if (a < 0.005) continue;
-    ctx.fillStyle = `${LIGHT.glow}${a})`;
+    ctx.fillStyle = `${glowColor}${a})`;
     ctx.fillRect(x - gw, y + dy, gw * 2, 2);
   }
-  const cTop = isBridge ? P[4] : P[3];
-  const cBot = isBridge ? P[3] : P[2];
+  const cTop = isPoisoned ? P[38] : (isBridge ? P[4] : P[3]);
+  const cBot = isPoisoned ? P[37] : (isBridge ? P[3] : P[2]);
   for (let dy = -r; dy <= r; dy++) {
     const w = Math.floor(Math.sqrt(r * r - dy * dy));
     ctx.fillStyle = P[11];
@@ -445,6 +558,11 @@ function drawFrog() {
     if (a < 0.005) continue;
     ctx.fillStyle = `${LIGHT.glowFrog}${a})`;
     ctx.fillRect(Math.floor(sx) - gw, Math.floor(sy) + dy, gw * 2, 2);
+  }
+  // Flash when stunned (blink every 100ms)
+  if (f.stunned && Math.floor(state.time / 100) % 2 === 0) {
+    // Skip sprite draw on odd frames for flashing effect
+    return;
   }
   const frogDef = FROGS[save.selectedFrog];
   const sprite = remapSprite(f.jumping ? FROG_JUMP : FROG, frogDef.colorMap);
@@ -621,7 +739,8 @@ function drawEdgeArrows() {
 
 function drawFlash() {
   if (state.flash <= 0) return;
-  ctx.fillStyle = `rgba(254,231,97,${state.flash})`;
+  const color = state.frog.stunned ? `rgba(140,60,200,${state.flash})` : `rgba(254,231,97,${state.flash})`;
+  ctx.fillStyle = color;
   ctx.fillRect(0, 0, W, H);
   state.flash -= 0.06;
 }
@@ -657,6 +776,29 @@ function drawSectionLabel() {
   ctx.fillStyle = `rgba(255,255,255,${alpha})`;
   ctx.fillText(text, W / 2, 13);
   state.sectionLabel -= 0.6;
+}
+
+function drawAchievementToast() {
+  const t = state.achievementToast;
+  if (!t || t.timer <= 0) { state.achievementToast = null; return; }
+  const alpha = t.timer > 150 ? Math.min((180 - t.timer) / 30, 1) : Math.min(t.timer / 40, 1);
+  const slideY = t.timer > 150 ? -8 * (1 - (180 - t.timer) / 30) : 0;
+  // Gold banner background
+  ctx.fillStyle = `rgba(40,30,10,${alpha * 0.85})`;
+  ctx.fillRect(10, 28 + slideY, W - 20, 22);
+  ctx.fillStyle = `rgba(255,210,80,${alpha * 0.6})`;
+  ctx.fillRect(10, 28 + slideY, W - 20, 1);
+  ctx.fillRect(10, 49 + slideY, W - 20, 1);
+  // Text
+  ctx.fillStyle = `rgba(255,220,100,${alpha})`;
+  ctx.font = `5px ${F}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillText(t.name, W / 2, 31 + slideY);
+  ctx.fillStyle = `rgba(255,255,255,${alpha * 0.8})`;
+  ctx.font = `4px ${F}`;
+  ctx.fillText(t.desc, W / 2, 40 + slideY);
+  t.timer--;
 }
 
 // ─── Atmosphere ─────────────────────────────────────
@@ -798,8 +940,24 @@ function updateJump(ts) {
     state.frog.target = null;
     state.frog.jumping = false;
 
+    const landedPad = state.pads[state.frog.pad];
+
+    // Poison pad check
+    if (landedPad.isPoisoned) {
+      playSound('poison');
+      state.frog.stunned = true;
+      state.frog.stunEnd = ts + 1000;
+      state.screenShake = 20;
+      state.flash = 0.3;
+      save.stats.poisonLands++;
+      checkAchievements();
+      writeSave();
+    } else {
+      playSound('land');
+    }
+
     // Check section change
-    const newSec = state.pads[state.frog.pad].section;
+    const newSec = landedPad.section;
     if (newSec !== state.currentSection) {
       state.currentSection = newSec;
       state.visitedSections.add(newSec);
@@ -808,6 +966,7 @@ function updateJump(ts) {
       cam.ty = sec.wy;
       state.sectionName = sec.name;
       state.sectionLabel = 60;
+      checkAchievements();
     }
 
     checkCollection();
@@ -838,10 +997,18 @@ function checkCollection() {
   if (!pad.hasFruit) return;
   const basePts = { apple: 10, orange: 15, cherry: 25 };
   const pts = (basePts[pad.fruitType] || 10) + eff().bonusPts;
+  const fruitType = pad.fruitType;
   state.score += pts;
   pad.hasFruit = false;
   pad.fruitType = null;
   state.flash = 0.25;
+  playSound(fruitType === 'cherry' ? 'collect_cherry' : fruitType === 'orange' ? 'collect_orange' : 'collect');
+
+  // Update stats for achievements
+  save.stats.totalFruit++;
+  if (fruitType === 'apple') save.stats.apples++;
+  else if (fruitType === 'orange') save.stats.oranges++;
+  else if (fruitType === 'cherry') save.stats.cherries++;
 
   save.xp += pts;
   const needed = xpForLevel(save.level);
@@ -851,31 +1018,74 @@ function checkCollection() {
     save.skillPoints++;
     state.levelUp = 80;
     state.flash = 0.5;
+    playSound('levelup');
   }
+  checkAchievements();
   writeSave();
+}
+
+function checkAchievements() {
+  ACHIEVEMENTS.forEach(a => {
+    if (save.achievements.includes(a.id)) return;
+    if (a.check(save.stats, state, save)) {
+      save.achievements.push(a.id);
+      state.achievementToast = { name: a.name, desc: a.desc, timer: 180 };
+      playSound('achievement');
+      writeSave();
+    }
+  });
 }
 
 // ─── Update & Draw ──────────────────────────────────
 function update(ts) {
   updateCamera();
+  // Stun timer
+  if (state.frog.stunned && ts >= state.frog.stunEnd) {
+    state.frog.stunned = false;
+    playSound('stunEnd');
+  }
   updateJump(ts);
   updateFruitSpawning(ts);
 }
 
 function draw() {
   drawWater();
+  // Screen shake from poison stun
+  const shaking = state.screenShake > 0;
+  if (shaking) {
+    const sx = Math.floor((Math.random() - 0.5) * 3);
+    const sy = Math.floor((Math.random() - 0.5) * 3);
+    ctx.save();
+    ctx.translate(sx, sy);
+    state.screenShake--;
+  }
   state.pads.forEach(pad => {
     if (!inView(pad.x, pad.y, 20)) return;
-    drawLilyPad(pad.x - cam.x, pad.y - cam.y, CONFIG.PAD_RADIUS, pad.isBridge);
+    drawLilyPad(pad.x - cam.x, pad.y - cam.y, CONFIG.PAD_RADIUS, pad.isBridge, pad.isPoisoned);
+    // Poison bubbles
+    if (pad.isPoisoned) {
+      const px = pad.x - cam.x, py = pad.y - cam.y;
+      for (let b = 0; b < 3; b++) {
+        const bx = px + Math.sin(state.time * 0.003 + b * 2.1) * 5;
+        const by = py - CONFIG.PAD_RADIUS - 2 - ((state.time * 0.02 + b * 8) % 12);
+        const ba = 0.4 - ((state.time * 0.02 + b * 8) % 12) / 30;
+        if (ba > 0) {
+          ctx.fillStyle = `rgba(140,60,200,${ba})`;
+          ctx.fillRect(Math.floor(bx), Math.floor(by), 1, 1);
+        }
+      }
+    }
     drawFruitOnPad(pad);
   });
   drawFrog();
+  if (shaking) ctx.restore();
   drawAtmosphere();
   drawFlash();
   drawLevelUp();
   drawSectionLabel();
   drawEdgeArrows();
   drawHUD();
+  drawAchievementToast();
 }
 
 // ─── Upgrade Screen ─────────────────────────────────
@@ -1027,7 +1237,7 @@ function drawPauseMenu() {
   drawWater();
   state.pads.forEach(pad => {
     if (!inView(pad.x, pad.y, 20)) return;
-    drawLilyPad(pad.x - cam.x, pad.y - cam.y, CONFIG.PAD_RADIUS, pad.isBridge);
+    drawLilyPad(pad.x - cam.x, pad.y - cam.y, CONFIG.PAD_RADIUS, pad.isBridge, pad.isPoisoned);
     drawFruitOnPad(pad);
   });
   drawFrog();
@@ -1175,7 +1385,7 @@ document.addEventListener('keydown', (e) => {
     state.pauseCursor = 0;
     return;
   }
-  if (state.frog.jumping) return;
+  if (state.frog.jumping || state.frog.stunned) return;
   const dir = KEYS[e.code];
   if (!dir) return;
   e.preventDefault();
@@ -1184,6 +1394,7 @@ document.addEventListener('keydown', (e) => {
     state.frog.target = t;
     state.frog.jumping = true;
     state.frog.jumpStart = state.time;
+    playSound('jump');
   }
 });
 
@@ -1199,7 +1410,7 @@ function handleTouchPlaying(pos) {
   if (pos.x >= W - 20 && pos.y <= 25) {
     state.screen = 'paused'; state.pauseCursor = 0; return;
   }
-  if (state.frog.jumping) return;
+  if (state.frog.jumping || state.frog.stunned) return;
   const pad = state.pads[state.frog.pad];
   const dx = pos.x - (pad.x - cam.x);
   const dy = pos.y - (pad.y - cam.y);
@@ -1210,6 +1421,7 @@ function handleTouchPlaying(pos) {
     state.frog.target = t;
     state.frog.jumping = true;
     state.frog.jumpStart = state.time;
+    playSound('jump');
   }
 }
 
@@ -1257,6 +1469,7 @@ function enterUpgrades() {
 }
 
 function startGame() {
+  initAudio();
   state.screen = 'playing';
   state.score = 0;
   state.flash = 0;
