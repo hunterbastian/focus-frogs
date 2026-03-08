@@ -2,9 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Frog Pond</title>
-  <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#0a0a12">
+  <title>Focus Frogs</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body {
@@ -21,123 +25,135 @@
       position: fixed;
       width: 100%;
       touch-action: none;
+      font-size: 0;
+      color: transparent;
     }
     canvas {
-      width: min(90vw, 90vh);
-      height: min(90vw, 90vh);
       image-rendering: pixelated;
       image-rendering: -moz-crisp-edges;
       image-rendering: -webkit-crisp-edges;
       touch-action: none;
+      cursor: pointer;
     }
+    /* Desktop: show game + shop panel */
+    @media (min-width: 769px) {
+      canvas {
+        width: min(90vw, calc(90vh * 356 / 256));
+        height: min(calc(90vw * 256 / 356), 90vh);
+      }
+    }
+    /* Mobile: game area only, use more space */
+    @media (max-width: 768px) {
+      canvas {
+        width: min(98vw, calc(98vh * 1));
+        height: min(98vw, 98vh);
+      }
+      body {
+        padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+      }
+    }
+    :fullscreen, :-webkit-full-screen { background: #0a0a12; }
   </style>
 </head>
 <body>
-<canvas id="pond" width="192" height="192"></canvas>
+<canvas id="pond" width="356" height="256"></canvas>
 <script>
-// ─── Audio ──────────────────────────────────────────
-let audioCtx = null;
-function initAudio() {
-  if (audioCtx) return;
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-}
-function playSound(type) {
-  if (!audioCtx) return;
-  const t = audioCtx.currentTime;
-  const g = audioCtx.createGain();
-  g.connect(audioCtx.destination);
-
-  if (type === 'jump') {
-    const o = audioCtx.createOscillator();
-    o.type = 'square'; o.frequency.setValueAtTime(220, t);
-    o.frequency.exponentialRampToValueAtTime(520, t + 0.08);
-    g.gain.setValueAtTime(0.08, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
-    o.connect(g); o.start(t); o.stop(t + 0.1);
-
-  } else if (type === 'land') {
-    const o = audioCtx.createOscillator();
-    o.type = 'sine'; o.frequency.setValueAtTime(120, t);
-    o.frequency.exponentialRampToValueAtTime(60, t + 0.06);
-    g.gain.setValueAtTime(0.06, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
-    o.connect(g); o.start(t); o.stop(t + 0.08);
-
-  } else if (type === 'collect' || type === 'collect_orange' || type === 'collect_cherry') {
-    const base = type === 'collect_cherry' ? 880 : type === 'collect_orange' ? 740 : 620;
-    const o = audioCtx.createOscillator();
-    o.type = 'sine'; o.frequency.setValueAtTime(base, t);
-    o.frequency.exponentialRampToValueAtTime(base * 1.5, t + 0.1);
-    g.gain.setValueAtTime(0.1, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
-    o.connect(g); o.start(t); o.stop(t + 0.15);
-
-  } else if (type === 'levelup') {
-    [440, 554, 659].forEach((freq, i) => {
-      const o = audioCtx.createOscillator();
-      const ng = audioCtx.createGain();
-      o.type = 'sine'; o.frequency.setValueAtTime(freq, t + i * 0.1);
-      ng.gain.setValueAtTime(0.1, t + i * 0.1);
-      ng.gain.exponentialRampToValueAtTime(0.001, t + i * 0.1 + 0.2);
-      o.connect(ng); ng.connect(audioCtx.destination);
-      o.start(t + i * 0.1); o.stop(t + i * 0.1 + 0.2);
-    });
-
-  } else if (type === 'poison') {
-    // Dissonant low buzz — two detuned oscillators
-    [80, 93].forEach(freq => {
-      const o = audioCtx.createOscillator();
-      const ng = audioCtx.createGain();
-      o.type = 'sawtooth'; o.frequency.setValueAtTime(freq, t);
-      ng.gain.setValueAtTime(0.07, t);
-      ng.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
-      o.connect(ng); ng.connect(audioCtx.destination);
-      o.start(t); o.stop(t + 0.25);
-    });
-
-  } else if (type === 'stunEnd') {
-    const o = audioCtx.createOscillator();
-    o.type = 'triangle'; o.frequency.setValueAtTime(300, t);
-    o.frequency.exponentialRampToValueAtTime(550, t + 0.08);
-    g.gain.setValueAtTime(0.08, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
-    o.connect(g); o.start(t); o.stop(t + 0.1);
-
-  } else if (type === 'achievement') {
-    // Sparkly ascending chime — 4 quick notes
-    [660, 880, 1100, 1320].forEach((freq, i) => {
-      const o = audioCtx.createOscillator();
-      const ng = audioCtx.createGain();
-      o.type = 'sine'; o.frequency.setValueAtTime(freq, t + i * 0.07);
-      ng.gain.setValueAtTime(0.08, t + i * 0.07);
-      ng.gain.exponentialRampToValueAtTime(0.001, t + i * 0.07 + 0.15);
-      o.connect(ng); ng.connect(audioCtx.destination);
-      o.start(t + i * 0.07); o.stop(t + i * 0.07 + 0.15);
-    });
-  }
-}
+// ─── Audio (disabled — chill mode) ─────────────────
+function initAudio() {}
+function playSound() {}
 
 // ─── Config ─────────────────────────────────────────
-const W = 192, H = 192;
-const F = "'Geist Mono', monospace";
+const W = 256, H = 256, PANEL_W = 100, CW = W + PANEL_W;
+const F = "'Inter', sans-serif";
+// Shop panel layout
+const SHOP_ITEM_H = 13, SHOP_HDR_H = 11;
+const SHOP_TOP = 19, SHOP_BOT = H - 40;
 const CONFIG = {
-  PAD_RADIUS: 14,
-  JUMP_DURATION: 280,
-  JUMP_ARC: 22,
+  PAD_RADIUS: 18,
+  JUMP_DURATION: 600,
+  JUMP_ARC: 24,
   FRUIT_SPAWN_MS: 3000,
   MAX_FRUIT: 6,
   AIM_CONE: Math.PI / 3,
 };
 
+// ─── Biomes ─────────────────────────────────────────
+const BIOMES = [
+  { name: 'THE POND',     water: '#1a1c2c', stripe1: '#0b3d6e', stripe2: '#1b6fa8',
+    highlight: '#4a90b8',  highlight2: '#7ab8d0', warm: '#c8a860',
+    glow: 'rgba(255,220,140,', specular: '#f0e8c8',
+    fog: 'rgba(200,190,160,', pR: 255, pG: 240, pB: 180 },
+  { name: 'FROST LAKE',   water: '#101828', stripe1: '#1a4878', stripe2: '#3878b0',
+    highlight: '#78b8e0',  highlight2: '#a0d8f0', warm: '#88b8d0',
+    glow: 'rgba(160,220,255,', specular: '#d8f0ff',
+    fog: 'rgba(180,200,220,', pR: 180, pG: 220, pB: 255 },
+  { name: 'THE SWAMP',    water: '#101a10', stripe1: '#183818', stripe2: '#285830',
+    highlight: '#488848',  highlight2: '#68a868', warm: '#88a850',
+    glow: 'rgba(140,220,100,', specular: '#d0f0c0',
+    fog: 'rgba(160,190,130,', pR: 160, pG: 240, pB: 120 },
+  { name: 'CORAL REEF',   water: '#0a1428', stripe1: '#0a3060', stripe2: '#1060a0',
+    highlight: '#30a0d0',  highlight2: '#50c0e0', warm: '#50c8b0',
+    glow: 'rgba(80,200,220,', specular: '#c0f0f8',
+    fog: 'rgba(140,190,200,', pR: 100, pG: 220, pB: 240 },
+  { name: 'LAVA SPRINGS', water: '#1c0c0c', stripe1: '#3e1a0a', stripe2: '#6e2a10',
+    highlight: '#b05030',  highlight2: '#d07040', warm: '#e09040',
+    glow: 'rgba(255,140,60,', specular: '#ffe0b0',
+    fog: 'rgba(200,150,120,', pR: 255, pG: 160, pB: 80 },
+];
+
 const LIGHT = {
-  waterHighlight: '#4a90b8',
-  waterHighlight2: '#7ab8d0',
-  waterWarm: '#c8a860',
-  specular: '#f0e8c8',
-  glow: 'rgba(255,220,140,',
   glowFrog: 'rgba(255,210,120,',
   glowPoison: 'rgba(140,60,200,',
 };
+
+// ─── Lily Pad Decorations ─────────────────────────
+// Per-biome decoration styles: tiny pixel flora that grows during focus
+// Each has 3 stages (small → medium → full) drawn procedurally
+const BIOME_DECOR = [
+  { name: 'flower',  colors: ['#e8a0b0', '#e43b7a', '#f0c0d0'] },  // Pond: pink flowers
+  { name: 'crystal', colors: ['#88c8e8', '#a0e0ff', '#d8f0ff'] },  // Frost: ice crystals
+  { name: 'shroom',  colors: ['#c8a060', '#a07840', '#e8c880'] },  // Swamp: mushrooms
+  { name: 'coral',   colors: ['#f07088', '#ff5080', '#ffa0b8'] },  // Coral: sea anemones
+  { name: 'ember',   colors: ['#d06020', '#f09030', '#ffe060'] },  // Lava: ember crystals
+];
+const DECOR_GROWTH_INTERVAL = 60000; // Grow 1 decoration per 60s of focus
+const DECOR_MAX_STAGE = 3;
+const DECOR_MAX_GROWTH = 100; // Max growth points (lots of pads fully decorated)
+
+// ─── Day/Night Cycle ──────────────────────────────
+// Advances per focus session completed: day → dusk → night → dawn → day
+// 4 phases, each lasting 1 focus session
+const DAY_PHASES = [
+  { name: 'DAY',   tint: null,                    particleAlpha: 1.0, xpBonus: 0 },
+  { name: 'DUSK',  tint: 'rgba(180,100,40,0.08)', particleAlpha: 1.2, xpBonus: 0 },
+  { name: 'NIGHT', tint: 'rgba(10,10,50,0.22)',   particleAlpha: 1.5, xpBonus: 0.15 },
+  { name: 'DAWN',  tint: 'rgba(200,140,80,0.06)', particleAlpha: 1.1, xpBonus: 0.05 },
+];
+function getDayPhase() {
+  return DAY_PHASES[timer.sessionsCompleted % DAY_PHASES.length];
+}
+
+// ─── Focus Challenges ─────────────────────────────
+// Deterministic daily challenges seeded from date
+const CHALLENGE_POOL = [
+  { id: 'fruit_15',   text: 'Collect 15 fruit in one session',  check: () => timer.sessionFruit >= 15 },
+  { id: 'fruit_25',   text: 'Collect 25 fruit in one session',  check: () => timer.sessionFruit >= 25 },
+  { id: 'focus_3',    text: 'Complete 3 focus sessions today',   check: () => (save.history[getDateStr()] || 0) >= 3 },
+  { id: 'score_200',  text: 'Score 200+ points in one session',  check: () => timer.sessionScore >= 200 },
+  { id: 'score_400',  text: 'Score 400+ points in one session',  check: () => timer.sessionScore >= 400 },
+  { id: 'biome_3',    text: 'Visit 3 biomes in one session',     check: () => state.visitedSections && state.visitedSections.size >= 3 },
+  { id: 'focus_2',    text: 'Complete 2 focus sessions today',   check: () => (save.history[getDateStr()] || 0) >= 2 },
+  { id: 'fruit_10',   text: 'Collect 10 fruit in one session',  check: () => timer.sessionFruit >= 10 },
+];
+
+function getDailyChallenge() {
+  const ds = getDateStr();
+  // Simple hash from date string for deterministic seed
+  let hash = 0;
+  for (let i = 0; i < ds.length; i++) hash = ((hash << 5) - hash) + ds.charCodeAt(i);
+  const idx = Math.abs(hash) % CHALLENGE_POOL.length;
+  return CHALLENGE_POOL[idx];
+}
 
 // ─── Palette ────────────────────────────────────────
 const P = {
@@ -161,20 +177,19 @@ const P = {
 
 // ─── Sections (world layout) ────────────────────────
 const SECTIONS = [
-  { name: 'CENTER', wx: 192, wy: 192, padCount: 7, adj: [1, 2, 3, 4] },
-  { name: 'NORTH',  wx: 192, wy: 0,   padCount: 6, adj: [0] },
-  { name: 'WEST',   wx: 0,   wy: 192, padCount: 5, adj: [0] },
-  { name: 'EAST',   wx: 384, wy: 192, padCount: 5, adj: [0] },
-  { name: 'SOUTH',  wx: 192, wy: 384, padCount: 6, adj: [0] },
+  { name: 'THE POND',     label: 'P', wx: 256, wy: 256, padCount: 10, adj: [1, 2, 3, 4], biome: 0 },
+  { name: 'FROST LAKE',   label: 'F', wx: 256, wy: 0,   padCount: 10, adj: [0], biome: 1 },
+  { name: 'THE SWAMP',    label: 'S', wx: 0,   wy: 256, padCount: 10, adj: [0], biome: 2 },
+  { name: 'CORAL REEF',   label: 'C', wx: 512, wy: 256, padCount: 10, adj: [0], biome: 3 },
+  { name: 'LAVA SPRINGS', label: 'L', wx: 256, wy: 512, padCount: 10, adj: [0], biome: 4 },
 ];
 
 // Borders between adjacent sections: [sectionA, sectionB, side]
-// side = which edge of sectionA touches sectionB
 const BORDERS = [
-  [0, 1, 'top'],    // CENTER top ↔ NORTH bottom
-  [0, 2, 'left'],   // CENTER left ↔ WEST right
-  [0, 3, 'right'],  // CENTER right ↔ EAST left
-  [0, 4, 'bottom'], // CENTER bottom ↔ SOUTH top
+  [0, 1, 'top'],    // POND top ↔ FROST bottom
+  [0, 2, 'left'],   // POND left ↔ SWAMP right
+  [0, 3, 'right'],  // POND right ↔ CORAL left
+  [0, 4, 'bottom'], // POND bottom ↔ LAVA top
 ];
 
 // ─── Sprites ────────────────────────────────────────
@@ -232,12 +247,15 @@ const FROGS = [
 
 // ─── Upgrades Registry ──────────────────────────────
 const UPGRADES = [
-  { id: 'swift',    name: 'SWIFT JUMP', desc: '-20% jump time',      cost: 1, cat: 'jump' },
+  { id: 'swift',    name: 'SWIFT JUMP', desc: '-15% jump time',      cost: 1, cat: 'jump' },
   { id: 'high',     name: 'HIGH JUMP',  desc: '+25% jump arc',       cost: 1, cat: 'jump' },
   { id: 'reach',    name: 'LONG REACH', desc: 'wider aim cone',      cost: 1, cat: 'jump' },
+  { id: 'quickhop', name: 'QUICK HOPS', desc: 'less idle between hops', cost: 1, cat: 'jump' },
   { id: 'abundant', name: 'ABUNDANT',   desc: 'fruit spawns faster', cost: 1, cat: 'fruit' },
   { id: 'bountiful',name: 'BOUNTIFUL',  desc: '+5 pts per fruit',    cost: 1, cat: 'fruit' },
   { id: 'plenty',   name: 'PLENTY',     desc: '+2 max fruit',        cost: 1, cat: 'fruit' },
+  { id: 'focusext', name: 'DEEP FOCUS', desc: '+5 min focus time',   cost: 2, cat: 'focus' },
+  { id: 'shortbrk', name: 'QUICK REST', desc: '-1 min break time',   cost: 2, cat: 'focus' },
 ];
 
 // ─── Achievements ──────────────────────────────────
@@ -246,18 +264,46 @@ const ACHIEVEMENTS = [
   { id: 'apple_10',      name: 'APPLE PICKER',  desc: 'Collect 10 apples',         check: s => s.apples >= 10 },
   { id: 'orange_10',     name: 'CITRUS LOVER',  desc: 'Collect 10 oranges',        check: s => s.oranges >= 10 },
   { id: 'cherry_10',     name: 'CHERRY CHASER', desc: 'Collect 10 cherries',       check: s => s.cherries >= 10 },
-  { id: 'explorer',      name: 'EXPLORER',      desc: 'Visit all 5 sections',      check: (s, st) => st.visitedSections && st.visitedSections.size >= 5 },
+  { id: 'explorer',      name: 'EXPLORER',      desc: 'Visit all 5 biomes',        check: (s, st) => st.visitedSections && st.visitedSections.size >= 5 },
   { id: 'collector_50',  name: 'COLLECTOR',     desc: 'Collect 50 fruit',          check: s => s.totalFruit >= 50 },
   { id: 'collector_200', name: 'HOARDER',       desc: 'Collect 200 fruit',         check: s => s.totalFruit >= 200 },
   { id: 'survivor_5',    name: 'TOUGH SKIN',    desc: 'Survive 5 poison pads',     check: s => s.poisonLands >= 5 },
   { id: 'level_5',       name: 'GROWING UP',    desc: 'Reach level 5',             check: (s, st, sv) => sv.level >= 5 },
   { id: 'level_10',      name: 'VETERAN',       desc: 'Reach level 10',            check: (s, st, sv) => sv.level >= 10 },
+  { id: 'focus_1',       name: 'FIRST FOCUS',   desc: 'Complete 1 focus session',  check: s => (s.focusSessions || 0) >= 1 },
+  { id: 'focus_10',      name: 'DEEP WORK',     desc: 'Complete 10 focus sessions', check: s => (s.focusSessions || 0) >= 10 },
+  { id: 'focus_25',      name: 'ZEN MASTER',    desc: 'Complete 25 focus sessions', check: s => (s.focusSessions || 0) >= 25 },
+  { id: 'expand_max',    name: 'LANDLORD',      desc: 'Expand pond to max',        check: (s, st, sv) => sv.padLevel >= 10 },
+  { id: 'streak_3',      name: 'ON A ROLL',     desc: 'Focus 3 days in a row',     check: (s, st, sv) => (sv.streakCount || 0) >= 3 },
+  { id: 'streak_7',      name: 'WEEKLONG',      desc: 'Focus 7 days in a row',     check: (s, st, sv) => (sv.streakCount || 0) >= 7 },
+  { id: 'night_owl',     name: 'NIGHT OWL',     desc: 'Collect fruit at night',    check: (s, st) => getDayPhase().name === 'NIGHT' && s.totalFruit >= 1 },
+  { id: 'challenger_1',  name: 'CHALLENGER',    desc: 'Complete a daily challenge', check: (s, st, sv) => (sv.challengesCompleted || []).length >= 1 },
+  { id: 'challenger_5',  name: 'DEVOTED',       desc: 'Complete 5 daily challenges',check: (s, st, sv) => (sv.challengesCompleted || []).length >= 5 },
+];
+
+// ─── First-Run Tips ─────────────────────────────────
+const TIPS = [
+  { id: 'idle_hint',    text: 'Press SPACE to start a focus session' },
+  { id: 'focus_start',  text: 'Frog hops automatically during focus!' },
+  { id: 'first_fruit',  text: 'Fruit = XP! Level up to earn Skill Points' },
+  { id: 'poison_hit',   text: 'Purple pads stun your frog briefly' },
+  { id: 'first_break',  text: 'Break time \u2014 rest up for the next session' },
+  { id: 'first_level',  text: 'Skill Point earned! Buy upgrades with \u2191\u2193 + SPACE' },
+  { id: 'bridges',      text: 'Bridges unlocked! Explore new biomes' },
+  { id: 'shop_hint',    text: 'Use \u2191\u2193 to browse upgrades, SPACE to buy' },
+  { id: 'night_phase',  text: 'Night falls \u2014 earn bonus XP in the dark!' },
 ];
 
 // ─── Save System ────────────────────────────────────
-const SAVE_KEY = 'frogpond';
+const SAVE_KEY = 'focusfrogs';
 function loadSave() {
   try {
+    // Migrate from old save key
+    const old = localStorage.getItem('frogpond');
+    if (old && !localStorage.getItem(SAVE_KEY)) {
+      localStorage.setItem(SAVE_KEY, old);
+      localStorage.removeItem('frogpond');
+    }
     const raw = localStorage.getItem(SAVE_KEY);
     if (raw) {
       const s = JSON.parse(raw);
@@ -267,40 +313,162 @@ function loadSave() {
         selectedFrog: s.selectedFrog || 0,
         unlocked: s.unlocked || [0],
         upgrades: s.upgrades || [],
-        stats: s.stats || { totalFruit: 0, apples: 0, oranges: 0, cherries: 0, poisonLands: 0 },
+        padLevel: Math.min(s.padLevel || 1, 10),
+        stats: { totalFruit: 0, apples: 0, oranges: 0, cherries: 0, poisonLands: 0, focusSessions: 0, focusMinutes: 0, ...s.stats },
         achievements: s.achievements || [],
+        visitedSections: s.visitedSections || [0],
+        tipsShown: s.tipsShown || [],
+        streakCount: s.streakCount || 0,
+        lastSessionDate: s.lastSessionDate || null,
+        history: s.history || {},
+        challengesCompleted: s.challengesCompleted || [],
+        decorationGrowth: s.decorationGrowth || 0,
       };
     }
   } catch(e) {}
-  return { level: 1, xp: 0, skillPoints: 0, selectedFrog: 0, unlocked: [0], upgrades: [],
-    stats: { totalFruit: 0, apples: 0, oranges: 0, cherries: 0, poisonLands: 0 }, achievements: [] };
+  return { level: 1, xp: 0, skillPoints: 0, selectedFrog: 0, unlocked: [0], upgrades: [], padLevel: 1,
+    stats: { totalFruit: 0, apples: 0, oranges: 0, cherries: 0, poisonLands: 0, focusSessions: 0, focusMinutes: 0 },
+    achievements: [], visitedSections: [0], tipsShown: [],
+    streakCount: 0, lastSessionDate: null, history: {},
+    challengesCompleted: [], decorationGrowth: 0 };
 }
 function writeSave() { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); }
+function getDateStr() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function getYesterdayStr() {
+  const d = new Date(); d.setDate(d.getDate() - 1);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
 const save = loadSave();
 
-// ─── Effective Stats ────────────────────────────────
-function eff() {
+// ─── Pomodoro Timer ────────────────────────────────
+const POMO = {
+  FOCUS_MS:       25 * 60 * 1000,  // 25 min
+  SHORT_BREAK_MS:  5 * 60 * 1000,  // 5 min
+  LONG_BREAK_MS:  15 * 60 * 1000,  // 15 min
+  SESSIONS_BEFORE_LONG: 4,
+};
+
+const timer = {
+  phase: 'idle',       // 'idle' | 'focus' | 'break'
+  startedAt: 0,
+  durationMs: 0,
+  sessionsCompleted: 0,
+  sessionScore: 0,
+  sessionFruit: 0,
+  summaryTimer: 0,
+  summaryText: '',
+};
+
+function pomoRemaining() {
+  if (timer.phase === 'idle') return 0;
+  const elapsed = Date.now() - timer.startedAt;
+  return Math.max(0, timer.durationMs - elapsed);
+}
+
+function formatTime(ms) {
+  const totalSec = Math.ceil(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return m + ':' + (s < 10 ? '0' : '') + s;
+}
+
+function startFocus() {
+  initAudio();
   const u = save.upgrades;
-  return {
-    jumpDur:  CONFIG.JUMP_DURATION * (u.includes('swift') ? 0.8 : 1),
+  const extraMs = u.includes('focusext') ? 5 * 60 * 1000 : 0;
+  timer.phase = 'focus';
+  timer.startedAt = Date.now();
+  timer.durationMs = POMO.FOCUS_MS + extraMs;
+  timer.sessionScore = 0;
+  timer.sessionFruit = 0;
+  playSound('focusStart');
+  showTip('focus_start');
+}
+
+function endFocus() {
+  timer.sessionsCompleted++;
+  save.stats.focusSessions = (save.stats.focusSessions || 0) + 1;
+  save.stats.focusMinutes = (save.stats.focusMinutes || 0) + Math.round(timer.durationMs / 60000);
+  // ─── Streak + history tracking ───
+  const today = getDateStr();
+  if (save.lastSessionDate !== today) {
+    save.streakCount = (save.lastSessionDate === getYesterdayStr())
+      ? (save.streakCount || 0) + 1 : 1;
+    save.lastSessionDate = today;
+  }
+  save.history = save.history || {};
+  save.history[today] = (save.history[today] || 0) + 1;
+  // Show night tip on first night transition
+  if (getDayPhase().name === 'NIGHT') showTip('night_phase');
+  // Check daily challenge completion
+  const challenge = getDailyChallenge();
+  const todayKey = getDateStr() + ':' + challenge.id;
+  const challengeDone = !save.challengesCompleted.includes(todayKey) && challenge.check();
+  if (challengeDone) {
+    save.challengesCompleted.push(todayKey);
+    save.skillPoints += 1;
+    state.achievementToasts.push({ name: 'CHALLENGE DONE', desc: challenge.text + ' (+1 SP)', timer: 200 });
+  }
+  const nightLabel = getDayPhase().xpBonus > 0 ? '  *NIGHT*' : '';
+  timer.summaryText = '+' + timer.sessionScore + ' PTS  +' + timer.sessionFruit + ' FRUIT' + nightLabel;
+  timer.summaryTimer = 180;
+  playSound('focusEnd');
+  checkAchievements();
+  writeSave();
+  const isLong = timer.sessionsCompleted >= POMO.SESSIONS_BEFORE_LONG;
+  if (isLong) timer.sessionsCompleted = 0;
+  const u = save.upgrades;
+  const breakReduction = u.includes('shortbrk') ? 60 * 1000 : 0;
+  timer.phase = 'break';
+  timer.startedAt = Date.now();
+  timer.durationMs = (isLong ? POMO.LONG_BREAK_MS : POMO.SHORT_BREAK_MS) - breakReduction;
+  if (timer.durationMs < 60 * 1000) timer.durationMs = 60 * 1000;
+  showTip('first_break');
+}
+
+function endBreak() {
+  timer.phase = 'idle';
+  playSound('breakEnd');
+}
+
+function updatePomo() {
+  if (timer.phase === 'idle') return;
+  if (pomoRemaining() <= 0) {
+    if (timer.phase === 'focus') endFocus();
+    else if (timer.phase === 'break') endBreak();
+  }
+}
+
+// ─── Effective Stats ────────────────────────────────
+let _effCache = null;
+function eff() {
+  if (_effCache) return _effCache;
+  const u = save.upgrades;
+  _effCache = {
+    jumpDur:  CONFIG.JUMP_DURATION * (u.includes('swift') ? 0.85 : 1),
     jumpArc:  CONFIG.JUMP_ARC * (u.includes('high') ? 1.25 : 1),
     aimCone:  u.includes('reach') ? Math.PI / 2.5 : CONFIG.AIM_CONE,
     spawnMs:  CONFIG.FRUIT_SPAWN_MS * (u.includes('abundant') ? 0.7 : 1),
     bonusPts: u.includes('bountiful') ? 5 : 0,
     maxFruit: CONFIG.MAX_FRUIT + (u.includes('plenty') ? 2 : 0),
+    hopCooldown: u.includes('quickhop') ? 800 : 1500,
   };
+  return _effCache;
 }
+function invalidateEff() { _effCache = null; }
 
 // ─── XP ─────────────────────────────────────────────
 function xpForLevel(lv) { return Math.floor(50 * Math.pow(lv, 1.5)); }
 
 // ─── State ──────────────────────────────────────────
-const cam = { x: 192, y: 192, tx: 192, ty: 192 };
+const cam = { x: 256, y: 256, tx: 256, ty: 256 };
 const state = {
-  screen: 'title', // 'title' | 'playing' | 'paused' | 'upgrades'
-  prevScreen: 'title', // where to return from upgrades
+  screen: 'title',
   score: 0,
-  frog: { pad: 0, target: null, jumpStart: 0, jumping: false, drawX: 0, drawY: 0, stunned: false, stunEnd: 0 },
+  frog: { pad: 0, target: null, jumpStart: 0, jumping: false, drawX: 0, drawY: 0, stunned: false, stunEnd: 0, lastLanded: 0 },
   screenShake: 0,
   pads: [],
   currentSection: 0,
@@ -311,11 +479,18 @@ const state = {
   levelUp: 0,
   sectionLabel: 0,
   sectionName: '',
-  menuCursor: 0,
-  menuItems: [],
+  shopCursor: 0,
+  shopItems: [],
+  shopScroll: 0,
+  shopTotalH: 0,
+  shopDescLines: null,
   pauseCursor: 0,
+  lastDecorGrow: 0,
   atmosphere: { fogPatches: [], particles: [], vignetteGrad: null },
-  achievementToast: null, // { name, desc, timer }
+  achievementToasts: [],
+  tipQueue: [],
+  tipActive: null,
+  shopOpen: false,
 };
 
 // ─── Canvas ─────────────────────────────────────────
@@ -323,6 +498,61 @@ const canvas = document.getElementById('pond');
 const ctx = canvas.getContext('2d');
 ctx.imageSmoothingEnabled = false;
 let hasTouchInput = false;
+let isMobile = window.innerWidth <= 768;
+let fullscreenRequested = false;
+let swipeStart = null;
+const SWIPE_THRESHOLD = 30;
+
+function updateCanvasSize() {
+  const wasW = canvas.width;
+  canvas.width = isMobile ? W : CW;
+  canvas.height = H;
+  ctx.imageSmoothingEnabled = false;
+}
+updateCanvasSize();
+window.addEventListener('resize', () => {
+  isMobile = window.innerWidth <= 768;
+  updateCanvasSize();
+});
+
+// ─── Navigation ─────────────────────────────────────
+function navigateToSection(si) {
+  if (si === state.currentSection || si < 0 || si >= SECTIONS.length) return;
+  state.currentSection = si;
+  state.visitedSections.add(si);
+  save.visitedSections = [...state.visitedSections];
+  const sec = SECTIONS[si];
+  cam.tx = sec.wx; cam.ty = sec.wy;
+  state.sectionName = sec.name;
+  state.sectionLabel = 60;
+  const newPadIdx = state.pads.findIndex(p => p.section === si && isActive(p));
+  if (newPadIdx >= 0) {
+    state.frog.pad = newPadIdx;
+    state.frog.jumping = false; state.frog.target = null;
+  }
+  checkAchievements();
+  writeSave();
+}
+
+function getEdgeArrowHitZones() {
+  if (save.padLevel < 4) return [];
+  const zones = [];
+  BORDERS.forEach(([sA, sB, side]) => {
+    let arrowSec, dir;
+    if (sA === state.currentSection) { arrowSec = sB; dir = side; }
+    else if (sB === state.currentSection) {
+      arrowSec = sA;
+      dir = side === 'top' ? 'bottom' : side === 'bottom' ? 'top' : side === 'left' ? 'right' : 'left';
+    } else return;
+    let x, y;
+    if (dir === 'top')    { x = W / 2; y = 10; }
+    else if (dir === 'bottom') { x = W / 2; y = H - 10; }
+    else if (dir === 'left')   { x = 10; y = H / 2; }
+    else                       { x = W - 10; y = H / 2; }
+    zones.push({ x, y, section: arrowSec });
+  });
+  return zones;
+}
 
 // ─── Utilities ──────────────────────────────────────
 function dist(a, b) { return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2); }
@@ -331,7 +561,6 @@ function remapSprite(sprite, colorMap) {
   if (!colorMap) return sprite;
   return sprite.map(row => row.map(c => colorMap[c] !== undefined ? colorMap[c] : c));
 }
-function sectionOf(pad) { return pad.section; }
 function inView(wx, wy, margin) {
   const sx = wx - cam.x, sy = wy - cam.y;
   return sx > -margin && sx < W + margin && sy > -margin && sy < H + margin;
@@ -339,7 +568,7 @@ function inView(wx, wy, margin) {
 function touchToCanvas(touch) {
   const rect = canvas.getBoundingClientRect();
   return {
-    x: (touch.clientX - rect.left) * (W / rect.width),
+    x: (touch.clientX - rect.left) * (canvas.width / rect.width),
     y: (touch.clientY - rect.top) * (H / rect.height),
   };
 }
@@ -348,6 +577,8 @@ function angleToDirection(dx, dy) {
     ? (dx >= 0 ? 'right' : 'left')
     : (dy >= 0 ? 'down' : 'up');
 }
+function isActive(pad) { return pad.unlockLevel <= save.padLevel; }
+function biome() { return _biomeCache || BIOMES[SECTIONS[state.currentSection].biome]; }
 
 // ─── World Generation ───────────────────────────────
 function generateWorld() {
@@ -355,74 +586,111 @@ function generateWorld() {
   const R = CONFIG.PAD_RADIUS;
   const minD = R * 2.8;
 
-  // Generate interior pads for each section
+  // Generate up to 10 pads per section, tagged with unlock levels
   SECTIONS.forEach((sec, si) => {
-    const margin = 30;
-    const count = sec.padCount;
+    const margin = 40;
 
-    // First pad near center of section
+    // Pad 1: center of section (always unlockLevel 1)
     pads.push({
       x: sec.wx + W / 2, y: sec.wy + H / 2,
       section: si, hasFruit: false, fruitType: null,
+      unlockLevel: 1, isPoisoned: false,
     });
 
+    let sectionPadNum = 1;
     let attempts = 0;
     const secPads = pads.filter(p => p.section === si);
-    while (secPads.length < count && attempts < 200) {
+    while (sectionPadNum < 10 && attempts < 500) {
       const c = {
         x: sec.wx + margin + Math.random() * (W - margin * 2),
         y: sec.wy + margin + Math.random() * (H - margin * 2),
         section: si, hasFruit: false, fruitType: null,
+        unlockLevel: sectionPadNum + 1,
+        isPoisoned: false,
       };
       const tooClose = pads.some(p => dist(p, c) < minD);
       const reachable = secPads.some(p => dist(p, c) < minD * 2.2);
       if (!tooClose && reachable) {
         pads.push(c);
         secPads.push(c);
+        sectionPadNum++;
       }
       attempts++;
     }
   });
 
-  // Generate bridge pads at borders
+  // Bridge pads at borders — unlock at pad level 4
   BORDERS.forEach(([sA, sB, side]) => {
     const a = SECTIONS[sA], b = SECTIONS[sB];
-    // Place a pad near the edge of each section, aligned so they're jumpable
-    const spread = 40 + Math.random() * 60; // lateral position variation
+    const spread = 54 + Math.random() * 80;
     let ax, ay, bx, by;
 
     if (side === 'top') {
-      ax = a.wx + 60 + spread; ay = a.wy + 18;
-      bx = b.wx + 60 + spread; by = b.wy + H - 18;
+      ax = a.wx + 80 + spread; ay = a.wy + 24;
+      bx = b.wx + 80 + spread; by = b.wy + H - 24;
     } else if (side === 'bottom') {
-      ax = a.wx + 60 + spread; ay = a.wy + H - 18;
-      bx = b.wx + 60 + spread; by = b.wy + 18;
+      ax = a.wx + 80 + spread; ay = a.wy + H - 24;
+      bx = b.wx + 80 + spread; by = b.wy + 24;
     } else if (side === 'left') {
-      ax = a.wx + 18; ay = a.wy + 60 + spread;
-      bx = b.wx + W - 18; by = b.wy + 60 + spread;
-    } else { // right
-      ax = a.wx + W - 18; ay = a.wy + 60 + spread;
-      bx = b.wx + 18; by = b.wy + 60 + spread;
+      ax = a.wx + 24; ay = a.wy + 80 + spread;
+      bx = b.wx + W - 24; by = b.wy + 80 + spread;
+    } else {
+      ax = a.wx + W - 24; ay = a.wy + 80 + spread;
+      bx = b.wx + 24; by = b.wy + 80 + spread;
     }
 
-    // Only add if not too close to existing pads
     if (!pads.some(p => dist(p, {x:ax,y:ay}) < minD * 0.8)) {
-      pads.push({ x: ax, y: ay, section: sA, hasFruit: false, fruitType: null, isBridge: true });
+      pads.push({ x: ax, y: ay, section: sA, hasFruit: false, fruitType: null, isBridge: true, unlockLevel: 4, isPoisoned: false });
     }
     if (!pads.some(p => dist(p, {x:bx,y:by}) < minD * 0.8)) {
-      pads.push({ x: bx, y: by, section: sB, hasFruit: false, fruitType: null, isBridge: true });
+      pads.push({ x: bx, y: by, section: sB, hasFruit: false, fruitType: null, isBridge: true, unlockLevel: 4, isPoisoned: false });
     }
   });
 
-  // Mark ~18% of interior (non-bridge, non-spawn) pads as poisonous
-  pads.forEach((pad, i) => {
-    pad.isPoisoned = false;
-    if (i === 0) return;            // never poison spawn pad
-    if (pad.isBridge) return;       // never poison bridge pads
+  // Mark ~18% of interior (non-bridge, non-first) pads as poisonous
+  pads.forEach((pad) => {
+    if (pad.unlockLevel <= 1) return;
+    if (pad.isBridge) return;
     if (Math.random() < 0.18) pad.isPoisoned = true;
   });
 
+  // Distribute decorations based on saved growth
+  distributeDecorations(pads);
+
   return pads;
+}
+
+function distributeDecorations(pads) {
+  const growth = save.decorationGrowth;
+  if (growth <= 0) return;
+  // Use pad position as deterministic seed per pad
+  pads.forEach(pad => {
+    pad.decorStage = 0;
+    if (pad.isPoisoned || pad.isBridge) return;
+    if (!isActive(pad)) return;
+    // Deterministic hash from pad position
+    const hash = Math.abs(Math.sin(pad.x * 127.1 + pad.y * 311.7) * 43758.5453) % 1;
+    // Threshold decreases as growth increases → more pads get decorated
+    const threshold = 1 - (growth / DECOR_MAX_GROWTH);
+    if (hash > threshold) {
+      // Stage scales with growth: early = stage 1, mid = 2, high = 3
+      const stageRaw = (growth / DECOR_MAX_GROWTH) * DECOR_MAX_STAGE + hash;
+      pad.decorStage = Math.min(DECOR_MAX_STAGE, Math.max(1, Math.floor(stageRaw)));
+      // Deterministic offset angle for placement variety
+      pad.decorAngle = hash * Math.PI * 2;
+    }
+  });
+}
+
+function updateDecorationGrowth(ts) {
+  if (timer.phase !== 'focus') return;
+  if (save.decorationGrowth >= DECOR_MAX_GROWTH) return;
+  if (ts - state.lastDecorGrow < DECOR_GROWTH_INTERVAL) return;
+  state.lastDecorGrow = ts;
+  save.decorationGrowth = Math.min(save.decorationGrowth + 1, DECOR_MAX_GROWTH);
+  // Re-distribute to show new growth live
+  distributeDecorations(state.pads);
+  writeSave();
 }
 
 // ─── Drawing ────────────────────────────────────────
@@ -438,22 +706,23 @@ function drawSprite(sprite, x, y) {
 }
 
 function drawWater() {
-  ctx.fillStyle = P[5];
+  const b = biome();
+  ctx.fillStyle = b.water;
   ctx.fillRect(0, 0, W, H);
   state.waterPhase += 0.015;
   for (let y = 0; y < H; y += 6) {
     const off = Math.sin((y + state.waterPhase * 40) * 0.12) * 1.5;
-    ctx.fillStyle = P[13];
+    ctx.fillStyle = b.stripe1;
     ctx.fillRect(0, y + Math.floor(off), W, 1);
   }
   for (let y = 3; y < H; y += 12) {
     const off = Math.cos((y + state.waterPhase * 25) * 0.09) * 2;
-    ctx.fillStyle = P[15];
+    ctx.fillStyle = b.stripe2;
     ctx.fillRect(0, y + Math.floor(off), W, 1);
   }
-  // Water shimmer — moonlight reflection points
+  // Water shimmer
   const phase = state.waterPhase;
-  ctx.fillStyle = LIGHT.waterHighlight;
+  ctx.fillStyle = b.highlight;
   for (let i = 0; i < 35; i++) {
     const sx = Math.floor((Math.sin(i * 7.3 + phase * 1.2) * 0.5 + 0.5) * W);
     const sy = Math.floor((Math.sin(i * 13.7 + phase * 0.8) * 0.5 + 0.5) * H);
@@ -461,8 +730,7 @@ function drawWater() {
       ctx.fillRect(sx, sy, 1, 1);
     }
   }
-  // Rare bright sparkles (fewer, wider)
-  ctx.fillStyle = LIGHT.waterHighlight2;
+  ctx.fillStyle = b.highlight2;
   for (let i = 0; i < 8; i++) {
     const sx = Math.floor((Math.sin(i * 11.1 + phase * 1.7) * 0.5 + 0.5) * W);
     const sy = Math.floor((Math.sin(i * 17.3 + phase * 1.1) * 0.5 + 0.5) * H);
@@ -471,8 +739,7 @@ function drawWater() {
       ctx.fillRect(sx + 1, sy, 1, 1);
     }
   }
-  // Warm golden sparkles — Stardew-style warm light on water
-  ctx.fillStyle = LIGHT.waterWarm;
+  ctx.fillStyle = b.warm;
   for (let i = 0; i < 12; i++) {
     const sx = Math.floor((Math.sin(i * 9.7 + phase * 0.9) * 0.5 + 0.5) * W);
     const sy = Math.floor((Math.cos(i * 5.3 + phase * 1.4) * 0.5 + 0.5) * H);
@@ -482,15 +749,16 @@ function drawWater() {
   }
 }
 
-function drawLilyPad(x, y, r, isBridge, isPoisoned) {
+function drawLilyPad(x, y, r, isBridge, isPoisoned, biomeIdx) {
   x = Math.floor(x); y = Math.floor(y);
-  // Glow halo — warm for normal, purple for poison
-  const glowColor = isPoisoned ? LIGHT.glowPoison : LIGHT.glow;
-  const gr = r + 6;
+  const b = biomeIdx !== undefined ? BIOMES[biomeIdx] : biome();
+  // Glow halo
+  const glowColor = isPoisoned ? LIGHT.glowPoison : b.glow;
+  const gr = r + 8;
   for (let dy = -gr; dy <= gr; dy += 2) {
     const gw = Math.floor(Math.sqrt(gr * gr - dy * dy));
-    const dist = Math.abs(dy) / gr;
-    const a = (isPoisoned ? 0.06 : 0.04) * (1 - dist);
+    const d = Math.abs(dy) / gr;
+    const a = (isPoisoned ? 0.06 : 0.04) * (1 - d);
     if (a < 0.005) continue;
     ctx.fillStyle = `${glowColor}${a})`;
     ctx.fillRect(x - gw, y + dy, gw * 2, 2);
@@ -504,19 +772,19 @@ function drawLilyPad(x, y, r, isBridge, isPoisoned) {
     ctx.fillStyle = dy < -r / 3 ? cTop : cBot;
     ctx.fillRect(x - w, y + dy, w * 2, 1);
   }
-  ctx.fillStyle = P[5];
+  ctx.fillStyle = b.water;
   for (let i = 0; i < r; i++) {
     const nw = Math.max(1, Math.floor(i * 0.4));
     ctx.fillRect(x - nw, y - r + i, nw * 2, 1);
   }
-  // Specular highlight — moonlight glint on upper-left
-  ctx.fillStyle = LIGHT.specular;
+  // Specular highlight
+  ctx.fillStyle = b.specular;
   const specX = x - Math.floor(r * 0.35);
   const specY = y - Math.floor(r * 0.45);
   ctx.fillRect(specX, specY, 2, 1);
   ctx.fillRect(specX, specY + 1, 1, 1);
-  // Bounce light — water reflection on bottom-right rim
-  ctx.fillStyle = LIGHT.waterHighlight;
+  // Bounce light on bottom-right rim
+  ctx.fillStyle = b.highlight;
   for (let dy = Math.floor(r * 0.5); dy <= r; dy++) {
     const w = Math.floor(Math.sqrt(r * r - dy * dy));
     const rimW = Math.min(2, w);
@@ -524,16 +792,79 @@ function drawLilyPad(x, y, r, isBridge, isPoisoned) {
   }
 }
 
+function drawPadDecoration(pad) {
+  if (!pad.decorStage || pad.decorStage <= 0) return;
+  const sx = Math.floor(pad.x - cam.x), sy = Math.floor(pad.y - cam.y);
+  const biomeIdx = SECTIONS[pad.section].biome;
+  const decor = BIOME_DECOR[biomeIdx];
+  const stage = pad.decorStage;
+  const R = CONFIG.PAD_RADIUS;
+  const a = pad.decorAngle || 0;
+  // Place decorations around the pad rim
+  const spots = stage >= 2 ? (stage >= 3 ? 3 : 2) : 1;
+  for (let i = 0; i < spots; i++) {
+    const angle = a + (i * Math.PI * 2 / spots);
+    const dist = R * 0.6;
+    const dx = Math.floor(Math.cos(angle) * dist);
+    const dy = Math.floor(Math.sin(angle) * dist * 0.6); // flatten for top-down
+    const px = sx + dx, py = sy + dy;
+    const bob = Math.sin(state.time * 0.001 + i * 2.1) * 0.4;
+    if (decor.name === 'flower') {
+      // Stem
+      ctx.fillStyle = '#3e8948';
+      ctx.fillRect(px, py - 1 + bob, 1, 2);
+      // Bloom (bigger at higher stages)
+      ctx.fillStyle = decor.colors[i % 3];
+      ctx.fillRect(px - 1, py - 2 + bob, 3, 1);
+      if (stage >= 2) ctx.fillRect(px, py - 3 + bob, 1, 1);
+    } else if (decor.name === 'crystal') {
+      // Vertical shard
+      ctx.fillStyle = decor.colors[1];
+      ctx.fillRect(px, py - 1 + bob, 1, 2);
+      ctx.fillStyle = decor.colors[2];
+      ctx.fillRect(px, py - 2 + bob, 1, 1);
+      if (stage >= 2) {
+        ctx.fillStyle = decor.colors[0];
+        ctx.fillRect(px + 1, py + bob, 1, 1);
+      }
+    } else if (decor.name === 'shroom') {
+      // Stem
+      ctx.fillStyle = decor.colors[2];
+      ctx.fillRect(px, py + bob, 1, 2);
+      // Cap
+      ctx.fillStyle = decor.colors[0];
+      ctx.fillRect(px - 1, py - 1 + bob, 3, 1);
+      ctx.fillStyle = decor.colors[1];
+      ctx.fillRect(px, py - 1 + bob, 1, 1);
+    } else if (decor.name === 'coral') {
+      // Branching tentacles
+      ctx.fillStyle = decor.colors[i % 3];
+      ctx.fillRect(px, py + bob, 1, 2);
+      ctx.fillRect(px - 1, py - 1 + bob, 1, 1);
+      if (stage >= 2) ctx.fillRect(px + 1, py - 1 + bob, 1, 1);
+    } else if (decor.name === 'ember') {
+      // Glowing crystal with flicker
+      const flicker = 0.5 + 0.5 * Math.sin(state.time * 0.004 + i * 3.1);
+      ctx.fillStyle = decor.colors[0];
+      ctx.fillRect(px, py + bob, 1, 2);
+      ctx.fillStyle = `rgba(255,200,80,${flicker * 0.4})`;
+      ctx.fillRect(px - 1, py - 1 + bob, 3, 1);
+      ctx.fillStyle = decor.colors[2];
+      ctx.fillRect(px, py - 1 + bob, 1, 1);
+    }
+  }
+}
+
 function drawFruitOnPad(pad) {
   if (!pad.hasFruit) return;
   if (!inView(pad.x, pad.y, 20)) return;
+  const b = biome();
   const sprite = FRUIT[pad.fruitType];
   const bob = Math.sin(state.time * 0.004) * 1.5;
   const sx = pad.x - cam.x, sy = pad.y - cam.y;
   drawSprite(sprite, sx - 3, sy - CONFIG.PAD_RADIUS - 4 + bob);
-  // Fruit specular highlight + shadow accent
   const fx = Math.floor(sx - 3), fy = Math.floor(sy - CONFIG.PAD_RADIUS - 4 + bob);
-  ctx.fillStyle = LIGHT.specular;
+  ctx.fillStyle = b.specular;
   ctx.fillRect(fx + 1, fy + 1, 1, 1);
   ctx.fillStyle = 'rgba(0,0,0,0.25)';
   ctx.fillRect(fx + 4, fy + 4, 1, 1);
@@ -546,116 +877,253 @@ function drawFrog() {
     wx = f.drawX; wy = f.drawY;
   } else {
     const pad = state.pads[f.pad];
-    wx = pad.x; wy = pad.y;
+    wx = pad.x;
+    wy = pad.y + Math.sin(state.time * 0.002) * 0.7; // breathing bob
   }
   const sx = wx - cam.x, sy = wy - cam.y;
-  // Player glow — warm light pool around the frog
-  const glr = 20;
+  // Player glow
+  const glr = 26;
   for (let dy = -glr; dy <= glr; dy += 2) {
     const gw = Math.floor(Math.sqrt(glr * glr - dy * dy));
-    const dist = Math.sqrt(dy * dy) / glr;
-    const a = 0.06 * (1 - dist * dist);
+    const d = Math.sqrt(dy * dy) / glr;
+    const a = 0.06 * (1 - d * d);
     if (a < 0.005) continue;
     ctx.fillStyle = `${LIGHT.glowFrog}${a})`;
     ctx.fillRect(Math.floor(sx) - gw, Math.floor(sy) + dy, gw * 2, 2);
   }
-  // Flash when stunned (blink every 100ms)
-  if (f.stunned && Math.floor(state.time / 100) % 2 === 0) {
-    // Skip sprite draw on odd frames for flashing effect
-    return;
-  }
+  if (f.stunned && Math.floor(state.time / 100) % 2 === 0) return;
   const frogDef = FROGS[save.selectedFrog];
   const sprite = remapSprite(f.jumping ? FROG_JUMP : FROG, frogDef.colorMap);
   const offX = -Math.floor(sprite[0].length / 2);
   const offY = -sprite.length + 2;
   drawSprite(sprite, sx + offX, sy + offY);
-  // Frog specular highlights + shadow
+  const b = biome();
   const fsx = Math.floor(sx + offX), fsy = Math.floor(sy + offY);
-  ctx.fillStyle = LIGHT.specular;
+  ctx.fillStyle = b.specular;
   ctx.fillRect(fsx + 2, fsy + 2, 1, 1);
   ctx.fillRect(fsx + 3, fsy + 3, 1, 1);
   ctx.fillStyle = 'rgba(0,0,0,0.15)';
   ctx.fillRect(fsx + 9, fsy + 7, 1, 1);
   ctx.fillRect(fsx + 8, fsy + 8, 1, 1);
+
+  // ─── Idle animations (only when sitting still) ───
+  if (!f.jumping) {
+    // Eye blink: close eyes for 150ms every ~3.5 seconds
+    if ((state.time % 3500) < 150) {
+      const cm = frogDef.colorMap || {};
+      const eyeColor = P[cm[14] || 14]; // remapped head-outline color
+      ctx.fillStyle = eyeColor;
+      ctx.fillRect(fsx + 3, fsy, 2, 1);    // left eye row 0
+      ctx.fillRect(fsx + 2, fsy + 1, 3, 1); // left eye row 1
+      ctx.fillRect(fsx + 7, fsy, 2, 1);    // right eye row 0
+      ctx.fillRect(fsx + 7, fsy + 1, 3, 1); // right eye row 1
+    }
+    // Tongue flick: idle phase only, every ~8 seconds
+    if (timer.phase === 'idle' && (state.time % 8000) < 200) {
+      const tProg = (state.time % 8000) / 200;
+      const tongueLen = Math.floor(tProg * 3) + 1;
+      ctx.fillStyle = '#e43b44';
+      ctx.fillRect(fsx + 6, fsy + 5, tongueLen, 1);
+    }
+  }
 }
 
 function drawHUD() {
-  // Score + level
+  // ─── Timer display (top center) ───
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+
+  const mHudBig = isMobile ? 14 : 11;
+  const mHudMed = isMobile ? 9 : 7;
+  const mHudSm = isMobile ? 8 : 6;
+  const mHudXs = isMobile ? 7 : 5;
+  const mBarH = isMobile ? 28 : 24;
+
+  if (timer.phase === 'focus') {
+    ctx.fillStyle = '#000000bb';
+    ctx.fillRect(0, 0, W, mBarH);
+    ctx.fillStyle = P[3];
+    ctx.font = `bold ${mHudBig}px ${F}`;
+    ctx.fillText(formatTime(pomoRemaining()), W / 2, 3);
+    const sesNum = Math.min(timer.sessionsCompleted + 1, POMO.SESSIONS_BEFORE_LONG);
+    ctx.fillStyle = '#ffffff66';
+    ctx.font = `${mHudSm}px ${F}`;
+    ctx.fillText('FOCUS  \u00b7  ' + sesNum + '/' + POMO.SESSIONS_BEFORE_LONG, W / 2, isMobile ? 19 : 16);
+  } else if (timer.phase === 'break') {
+    ctx.fillStyle = '#000000bb';
+    ctx.fillRect(0, 0, W, mBarH);
+    ctx.fillStyle = biome().highlight2;
+    ctx.font = `bold ${mHudBig}px ${F}`;
+    ctx.fillText(formatTime(pomoRemaining()), W / 2, 3);
+    ctx.fillStyle = '#ffffff66';
+    ctx.font = `${mHudSm}px ${F}`;
+    ctx.fillText('BREAK  \u00b7  RELAX', W / 2, isMobile ? 19 : 16);
+  } else {
+    const alpha = 0.4 + 0.3 * Math.sin(state.time / 800);
+    ctx.fillStyle = '#000000bb';
+    ctx.fillRect(0, 0, W, mBarH);
+    ctx.fillStyle = `rgba(254,231,97,${alpha})`;
+    ctx.font = `bold ${isMobile ? 12 : 9}px ${F}`;
+    ctx.fillText(hasTouchInput ? 'TAP TO FOCUS' : 'PRESS SPACE', W / 2, 3);
+    ctx.fillStyle = '#ffffff44';
+    ctx.font = `${mHudSm}px ${F}`;
+    ctx.fillText('START A SESSION', W / 2, isMobile ? 19 : 16);
+  }
+
+  // Daily challenge reminder (below timer bar, during focus)
+  if (timer.phase === 'focus') {
+    const ch = getDailyChallenge();
+    const chKey = getDateStr() + ':' + ch.id;
+    if (!save.challengesCompleted.includes(chKey)) {
+      ctx.fillStyle = '#f7a54166';
+      ctx.font = `${mHudXs}px ${F}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(ch.text, W / 2, mBarH + 1);
+    }
+  }
+
+  // Score + level (top left), widened if streak active
+  const hasStreak = save.streakCount > 0;
+  const lvBoxW = isMobile ? (hasStreak ? 100 : 80) : (hasStreak ? 84 : 66);
+  const lvBoxH = isMobile ? 18 : 14;
   ctx.fillStyle = '#00000088';
-  ctx.fillRect(1, 1, 90, 10);
+  ctx.fillRect(1, 1, lvBoxW, lvBoxH);
   ctx.fillStyle = '#ffffff';
-  ctx.font = `5px ${F}`;
+  ctx.font = `${mHudMed}px ${F}`;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
-  ctx.fillText('LV' + save.level + ' ' + state.score + 'PTS', 3, 3);
-
-  // Skill points (top right)
-  if (save.skillPoints > 0) {
-    ctx.fillStyle = '#00000088';
-    ctx.fillRect(W - 36, 1, 35, 10);
-    ctx.fillStyle = P[10];
-    ctx.font = `5px ${F}`;
-    ctx.textAlign = 'right';
-    ctx.fillText(save.skillPoints + 'SP', W - 3, 3);
+  ctx.fillText('LV' + save.level + ' ' + state.score + 'PT', 4, isMobile ? 5 : 4);
+  if (hasStreak) {
+    const streakX = isMobile ? 82 : 69;
+    ctx.fillStyle = '#f7a541';
+    ctx.fillRect(streakX, isMobile ? 6 : 4, 3, 3);
+    ctx.fillStyle = '#ffffff99';
+    ctx.font = `${mHudSm}px ${F}`;
+    ctx.fillText(save.streakCount, streakX + 5, isMobile ? 5 : 4);
   }
 
   // XP bar (bottom)
   const needed = xpForLevel(save.level);
   const pct = Math.min(save.xp / needed, 1);
+  const xpBarH = isMobile ? 14 : 10;
   ctx.fillStyle = '#00000088';
-  ctx.fillRect(0, H - 7, W, 7);
+  ctx.fillRect(0, H - xpBarH, W, xpBarH);
   ctx.fillStyle = P[3];
-  ctx.fillRect(1, H - 6, Math.floor((W - 2) * pct), 3);
+  ctx.fillRect(1, H - xpBarH + 1, Math.floor((W - 2) * pct), isMobile ? 5 : 4);
   ctx.fillStyle = '#ffffffbb';
-  ctx.font = `5px ${F}`;
+  ctx.font = `${mHudSm}px ${F}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
-  ctx.fillText(save.xp + '/' + needed + 'XP', W / 2, H - 7);
+  ctx.fillText(save.xp + '/' + needed + 'XP', W / 2, H - xpBarH);
 
-  // Pause button (touch only)
+  // Pad count + day phase (bottom left, above XP bar)
+  const phase = getDayPhase();
+  const phaseColors = { DAY: '#fee761', DUSK: '#f7a541', NIGHT: '#7878cc', DAWN: '#f0c878' };
+  const padBarH = isMobile ? 14 : 11;
+  ctx.fillStyle = '#00000066';
+  ctx.fillRect(1, H - xpBarH - padBarH - 1, isMobile ? 100 : 82, padBarH);
+  ctx.fillStyle = '#ffffff88';
+  ctx.font = `${mHudSm}px ${F}`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText(save.padLevel + '/10 PADS', 4, H - xpBarH - padBarH);
+  // Day phase pill
+  ctx.fillStyle = phaseColors[phase.name] || '#ffffff88';
+  ctx.fillText(phase.name, isMobile ? 68 : 56, H - xpBarH - padBarH);
+
+  // Pause button (touch only) — larger on mobile
   if (hasTouchInput) {
-    const pby = save.skillPoints > 0 ? 13 : 2;
+    const pw = isMobile ? 24 : 17, ph = isMobile ? 20 : 14;
+    const ppx = W - pw - 3;
     ctx.fillStyle = '#00000066';
-    ctx.fillRect(W - 15, pby, 13, 10);
+    ctx.fillRect(ppx, 3, pw, ph);
     ctx.fillStyle = '#ffffff99';
-    ctx.fillRect(W - 12, pby + 2, 2, 6);
-    ctx.fillRect(W - 7, pby + 2, 2, 6);
+    const bw = isMobile ? 4 : 3, bh = isMobile ? 12 : 8;
+    const by = 3 + Math.floor((ph - bh) / 2);
+    ctx.fillRect(ppx + Math.floor(pw * 0.25), by, bw, bh);
+    ctx.fillRect(ppx + Math.floor(pw * 0.6), by, bw, bh);
+  }
+  // Shop button (mobile only)
+  if (isMobile && hasTouchInput && !state.shopOpen) {
+    const sbx = W - 30, sby = mBarH + 2;
+    ctx.fillStyle = '#00000066';
+    ctx.fillRect(sbx, sby, 26, 22);
+    ctx.fillStyle = P[10];
+    ctx.font = `${mHudSm}px ${F}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('SP', sbx + 13, sby + 8);
+    ctx.fillStyle = '#ffffff88';
+    ctx.font = `${mHudXs}px ${F}`;
+    ctx.fillText(save.skillPoints + '', sbx + 13, sby + 17);
   }
 
-  // Minimap (bottom-right)
+  // Session summary toast
+  if (timer.summaryTimer > 0) {
+    const alpha = Math.min(timer.summaryTimer / 30, 1);
+    const stY = isMobile ? 80 : 74;
+    const stH = isMobile ? 34 : 28;
+    ctx.fillStyle = `rgba(30,50,30,${alpha * 0.9})`;
+    ctx.fillRect(14, stY, W - 28, stH);
+    ctx.fillStyle = `rgba(99,199,77,${alpha})`;
+    ctx.font = `${mHudMed}px ${F}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText('SESSION COMPLETE!', W / 2, stY + 3);
+    ctx.fillStyle = `rgba(255,255,255,${alpha * 0.8})`;
+    ctx.font = `${mHudSm}px ${F}`;
+    ctx.fillText(timer.summaryText, W / 2, stY + (isMobile ? 17 : 15));
+    timer.summaryTimer--;
+  }
+
   drawMinimap();
 }
 
 function drawMinimap() {
-  const s = 10;
-  const gap = 1;
-  const mx = W - (3 * s + 2 * gap) - 3, my = H - (3 * s + 2 * gap) - 3;
+  const s = isMobile ? 18 : 14;
+  const gap = 2;
+  const mx = W - (3 * s + 2 * gap) - 4, my = H - (3 * s + 2 * gap) - 14;
 
-  // [gridCol, gridRow, sectionIndex, label]
   const cells = [
-    [1, 0, 1, 'N'],
-    [0, 1, 2, 'W'],
-    [1, 1, 0, 'C'],
-    [2, 1, 3, 'E'],
-    [1, 2, 4, 'S'],
+    [1, 0, 1],  // FROST
+    [0, 1, 2],  // SWAMP
+    [1, 1, 0],  // POND
+    [2, 1, 3],  // CORAL
+    [1, 2, 4],  // LAVA
   ];
 
-  cells.forEach(([cx, cy, si, label]) => {
+  // Are bridges unlocked?
+  const bridgesOpen = save.padLevel >= 4;
+
+  cells.forEach(([cx, cy, si]) => {
     const rx = mx + cx * (s + gap);
     const ry = my + cy * (s + gap);
     const isCurrent = si === state.currentSection;
     const visited = state.visitedSections && state.visitedSections.has(si);
+    const accessible = si === 0 || bridgesOpen;
+    const label = SECTIONS[si].label;
+
+    if (!accessible) {
+      // Locked section — dim
+      ctx.fillStyle = '#ffffff0a';
+      ctx.fillRect(rx, ry, s, s);
+      ctx.fillStyle = '#ffffff22';
+      ctx.font = `${isMobile ? 8 : 6}px ${F}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('?', rx + s / 2, ry + s / 2 + 1);
+      return;
+    }
+
     ctx.fillStyle = isCurrent ? P[3] : visited ? '#ffffff44' : '#ffffff22';
     ctx.fillRect(rx, ry, s, s);
-
-    // Section letter
     ctx.fillStyle = isCurrent ? '#ffffff' : visited ? '#ffffffaa' : '#ffffff55';
-    ctx.font = `4px ${F}`;
+    ctx.font = `${isMobile ? 8 : 6}px ${F}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(label, rx + s / 2, ry + s / 2 + 1);
 
-    // Frog dot on current section
     if (isCurrent) {
       const pad = state.pads[state.frog.pad];
       if (pad) {
@@ -669,7 +1137,7 @@ function drawMinimap() {
   });
 }
 
-// Placeholder arrow sprites (5x5) — will be replaced with user pixel art
+// Arrows
 const ARROW_UP = [
   [0,0,6,0,0],
   [0,6,6,6,0],
@@ -700,35 +1168,33 @@ const ARROW_RIGHT = [
 ];
 
 function drawEdgeArrows() {
-  const sec = SECTIONS[state.currentSection];
+  if (save.padLevel < 4) return; // No arrows until bridges unlock
   const alpha = 0.4 + 0.3 * Math.sin(state.time * 0.003);
   ctx.globalAlpha = alpha;
 
-  // For each border where current section is sA, show arrow at that edge
   BORDERS.forEach(([sA, sB, side]) => {
     let arrowSec, dir;
     if (sA === state.currentSection) { arrowSec = sB; dir = side; }
     else if (sB === state.currentSection) {
       arrowSec = sA;
-      // Flip direction (if CENTER's top touches NORTH, then from NORTH's perspective it's bottom)
       dir = side === 'top' ? 'bottom' : side === 'bottom' ? 'top' : side === 'left' ? 'right' : 'left';
     } else return;
 
-    const label = SECTIONS[arrowSec].name[0]; // First letter: N, W, E, S, or C
+    const label = SECTIONS[arrowSec].label;
     let sprite, sx, sy, lx, ly;
     if (dir === 'top') {
-      sprite = ARROW_UP; sx = W / 2 - 2; sy = 3; lx = W / 2; ly = 12;
+      sprite = ARROW_UP; sx = W / 2 - 2; sy = 4; lx = W / 2; ly = 16;
     } else if (dir === 'bottom') {
-      sprite = ARROW_DOWN; sx = W / 2 - 2; sy = H - 8; lx = W / 2; ly = H - 12;
+      sprite = ARROW_DOWN; sx = W / 2 - 2; sy = H - 10; lx = W / 2; ly = H - 16;
     } else if (dir === 'left') {
-      sprite = ARROW_LEFT; sx = 3; sy = H / 2 - 2; lx = 12; ly = H / 2 + 1;
+      sprite = ARROW_LEFT; sx = 4; sy = H / 2 - 2; lx = 16; ly = H / 2 + 1;
     } else {
-      sprite = ARROW_RIGHT; sx = W - 8; sy = H / 2 - 2; lx = W - 12; ly = H / 2 + 1;
+      sprite = ARROW_RIGHT; sx = W - 10; sy = H / 2 - 2; lx = W - 16; ly = H / 2 + 1;
     }
 
     drawSprite(sprite, sx, sy);
     ctx.fillStyle = P[6];
-    ctx.font = `4px ${F}`;
+    ctx.font = `6px ${F}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(label, lx, ly);
@@ -748,56 +1214,89 @@ function drawFlash() {
 function drawLevelUp() {
   if (state.levelUp <= 0) return;
   const alpha = Math.min(state.levelUp / 30, 1);
-  const yOff = (1 - alpha) * -8;
+  const yOff = (1 - alpha) * -10;
   ctx.fillStyle = `rgba(99,199,77,${alpha})`;
-  ctx.font = `8px ${F}`;
+  ctx.font = `11px ${F}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('LEVEL UP!', W / 2, H / 2 - 30 + yOff);
+  ctx.fillText('LEVEL UP!', W / 2, H / 2 - 40 + yOff);
   ctx.fillStyle = `rgba(255,255,255,${alpha * 0.9})`;
-  ctx.font = `5px ${F}`;
-  ctx.fillText('LV ' + save.level + '  +1 SP', W / 2, H / 2 - 17 + yOff);
+  ctx.font = `7px ${F}`;
+  ctx.fillText('LV ' + save.level + '  +1 SP', W / 2, H / 2 - 24 + yOff);
   state.levelUp -= 0.8;
 }
 
 function drawSectionLabel() {
   if (state.sectionLabel <= 0) return;
-  // Hold fully opaque for first 20 frames, then fade
   const alpha = state.sectionLabel > 40 ? 0.9 : (state.sectionLabel / 40) * 0.9;
   const text = '~ ' + state.sectionName + ' ~';
-  ctx.font = `7px ${F}`;
+  const slFont = isMobile ? 12 : 9;
+  const slY = isMobile ? 32 : 14;
+  ctx.font = `${slFont}px ${F}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-  // Dark background pill
   const tw = ctx.measureText(text).width;
   ctx.fillStyle = `rgba(0,0,0,${alpha * 0.7})`;
-  ctx.fillRect(W / 2 - tw / 2 - 5, 11, tw + 10, 14);
-  // Text
+  ctx.fillRect(W / 2 - tw / 2 - 6, slY, tw + 12, isMobile ? 22 : 18);
   ctx.fillStyle = `rgba(255,255,255,${alpha})`;
-  ctx.fillText(text, W / 2, 13);
+  ctx.fillText(text, W / 2, slY + 3);
   state.sectionLabel -= 0.6;
 }
 
 function drawAchievementToast() {
-  const t = state.achievementToast;
-  if (!t || t.timer <= 0) { state.achievementToast = null; return; }
+  if (!state.achievementToasts.length) return;
+  const t = state.achievementToasts[0];
+  if (t.timer <= 0) { state.achievementToasts.shift(); return; }
   const alpha = t.timer > 150 ? Math.min((180 - t.timer) / 30, 1) : Math.min(t.timer / 40, 1);
-  const slideY = t.timer > 150 ? -8 * (1 - (180 - t.timer) / 30) : 0;
-  // Gold banner background
+  const slideY = t.timer > 150 ? -10 * (1 - (180 - t.timer) / 30) : 0;
+  const atH = isMobile ? 36 : 30;
+  const atY = isMobile ? 42 : 38;
   ctx.fillStyle = `rgba(40,30,10,${alpha * 0.85})`;
-  ctx.fillRect(10, 28 + slideY, W - 20, 22);
+  ctx.fillRect(14, atY + slideY, W - 28, atH);
   ctx.fillStyle = `rgba(255,210,80,${alpha * 0.6})`;
-  ctx.fillRect(10, 28 + slideY, W - 20, 1);
-  ctx.fillRect(10, 49 + slideY, W - 20, 1);
-  // Text
+  ctx.fillRect(14, atY + slideY, W - 28, 1);
+  ctx.fillRect(14, atY + atH - 1 + slideY, W - 28, 1);
   ctx.fillStyle = `rgba(255,220,100,${alpha})`;
-  ctx.font = `5px ${F}`;
+  ctx.font = `${isMobile ? 9 : 7}px ${F}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-  ctx.fillText(t.name, W / 2, 31 + slideY);
+  ctx.fillText(t.name, W / 2, atY + 4 + slideY);
   ctx.fillStyle = `rgba(255,255,255,${alpha * 0.8})`;
-  ctx.font = `4px ${F}`;
-  ctx.fillText(t.desc, W / 2, 40 + slideY);
+  ctx.font = `${isMobile ? 8 : 6}px ${F}`;
+  ctx.fillText(t.desc, W / 2, atY + (isMobile ? 18 : 16) + slideY);
+  t.timer--;
+}
+
+// ─── Tips System ────────────────────────────────────
+function showTip(id) {
+  if (save.tipsShown.includes(id)) return;
+  const tip = TIPS.find(t => t.id === id);
+  if (!tip) return;
+  save.tipsShown.push(id);
+  state.tipQueue.push({ text: tip.text, timer: 240 });
+  writeSave();
+}
+
+function drawTip() {
+  if (!state.tipActive && state.tipQueue.length) {
+    state.tipActive = state.tipQueue.shift();
+  }
+  if (!state.tipActive) return;
+  const t = state.tipActive;
+  if (t.timer <= 0) { state.tipActive = null; return; }
+  const fadeIn = Math.min((240 - t.timer) / 20, 1);
+  const fadeOut = Math.min(t.timer / 40, 1);
+  const alpha = Math.min(fadeIn, fadeOut);
+  ctx.font = `6px ${F}`;
+  const tw = ctx.measureText(t.text).width;
+  const bx = W / 2 - tw / 2 - 6;
+  const by = H - 24;
+  ctx.fillStyle = `rgba(10,10,18,${alpha * 0.85})`;
+  ctx.fillRect(bx, by, tw + 12, 14);
+  ctx.fillStyle = `rgba(180,220,255,${alpha})`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillText(t.text, W / 2, by + 4);
   t.timer--;
 }
 
@@ -829,7 +1328,7 @@ function initAtmosphere() {
       hue: Math.floor(Math.random() * 3),
     });
   }
-  atm.vignetteGrad = ctx.createRadialGradient(W / 2, H / 2, 30, W / 2, H / 2, 120);
+  atm.vignetteGrad = ctx.createRadialGradient(W / 2, H / 2, 40, W / 2, H / 2, 160);
   atm.vignetteGrad.addColorStop(0, 'rgba(0,0,0,0)');
   atm.vignetteGrad.addColorStop(0.6, 'rgba(0,0,0,0)');
   atm.vignetteGrad.addColorStop(0.85, 'rgba(0,0,0,0.25)');
@@ -858,10 +1357,11 @@ function drawColorGrade() {
 }
 
 function drawFogOverlay() {
+  const b = biome();
   state.atmosphere.fogPatches.forEach(f => {
     const pulse = 0.6 + 0.4 * Math.sin(f.phase);
     const a = f.alpha * pulse;
-    ctx.fillStyle = `rgba(200,190,160,${a})`;
+    ctx.fillStyle = b.fog + a + ')';
     const cx = Math.floor(f.x), cy = Math.floor(f.y);
     const hw = Math.floor(f.w / 2), hh = Math.floor(f.h / 2);
     ctx.fillRect(cx - hw + 4, cy - hh, f.w - 8, 3);
@@ -876,15 +1376,40 @@ function drawVignette() {
 }
 
 function drawParticles() {
+  const b = biome();
   state.atmosphere.particles.forEach(p => {
     const flicker = 0.5 + 0.5 * Math.sin(state.time * 0.002 + p.phase * 10);
     const a = p.alpha * flicker;
     if (a < 0.05) return;
-    if (p.hue === 0) ctx.fillStyle = `rgba(255,240,180,${a})`;
-    else if (p.hue === 1) ctx.fillStyle = `rgba(220,200,140,${a})`;
-    else ctx.fillStyle = `rgba(180,255,140,${a})`;
+    if (p.hue === 0) ctx.fillStyle = `rgba(${b.pR},${b.pG},${b.pB},${a})`;
+    else if (p.hue === 1) ctx.fillStyle = `rgba(${Math.floor(b.pR*0.85)},${Math.floor(b.pG*0.85)},${Math.floor(b.pB*0.85)},${a})`;
+    else ctx.fillStyle = `rgba(${Math.floor(b.pR*0.7)},${Math.max(b.pG,180)},${Math.floor(b.pB*0.8)},${a})`;
     ctx.fillRect(Math.floor(p.x), Math.floor(p.y), p.size, p.size);
   });
+}
+
+function drawNightOverlay() {
+  const phase = getDayPhase();
+  if (!phase.tint) return;
+  ctx.fillStyle = phase.tint;
+  ctx.fillRect(0, 0, W, H);
+  // Fireflies during night & dusk
+  if (phase.name === 'NIGHT' || phase.name === 'DUSK') {
+    const count = phase.name === 'NIGHT' ? 12 : 5;
+    for (let i = 0; i < count; i++) {
+      const fx = (Math.sin(i * 7.3 + state.time * 0.0008) * 0.5 + 0.5) * W;
+      const fy = (Math.sin(i * 11.1 + state.time * 0.0006) * 0.5 + 0.5) * H;
+      const flicker = 0.3 + 0.7 * Math.sin(state.time * 0.003 + i * 2.7);
+      if (flicker < 0.3) continue;
+      const a = flicker * (phase.name === 'NIGHT' ? 0.7 : 0.4);
+      // Glow halo
+      ctx.fillStyle = `rgba(255,240,120,${a * 0.15})`;
+      ctx.fillRect(Math.floor(fx) - 2, Math.floor(fy) - 2, 5, 5);
+      // Bright center
+      ctx.fillStyle = `rgba(255,250,180,${a})`;
+      ctx.fillRect(Math.floor(fx), Math.floor(fy), 1, 1);
+    }
+  }
 }
 
 function drawAtmosphere() {
@@ -892,6 +1417,7 @@ function drawAtmosphere() {
   drawFogOverlay();
   drawVignette();
   drawParticles();
+  drawNightOverlay();
 }
 
 // ─── Game Logic ─────────────────────────────────────
@@ -904,12 +1430,12 @@ function findTargetPad(dir) {
 
   state.pads.forEach((pad, i) => {
     if (i === state.frog.pad) return;
+    if (!isActive(pad)) return;
     const dx = pad.x - cur.x, dy = pad.y - cur.y;
     const angle = Math.atan2(dy, dx);
     const diff = Math.abs(normAngle(angle - target));
     const d = dist(cur, pad);
-    // Max jump distance ~90px (covers cross-border bridge pads)
-    if (diff < cone && d < 90 && d < bestD) { bestD = d; best = i; }
+    if (diff < cone && d < 120 && d < bestD) { bestD = d; best = i; }
   });
   return best;
 }
@@ -917,7 +1443,6 @@ function findTargetPad(dir) {
 function updateCamera() {
   cam.x += (cam.tx - cam.x) * 0.1;
   cam.y += (cam.ty - cam.y) * 0.1;
-  // Snap when close enough
   if (Math.abs(cam.x - cam.tx) < 0.5) cam.x = cam.tx;
   if (Math.abs(cam.y - cam.ty) < 0.5) cam.y = cam.ty;
 }
@@ -939,10 +1464,10 @@ function updateJump(ts) {
     state.frog.pad = state.frog.target;
     state.frog.target = null;
     state.frog.jumping = false;
+    state.frog.lastLanded = ts;
 
     const landedPad = state.pads[state.frog.pad];
 
-    // Poison pad check
     if (landedPad.isPoisoned) {
       playSound('poison');
       state.frog.stunned = true;
@@ -950,17 +1475,18 @@ function updateJump(ts) {
       state.screenShake = 20;
       state.flash = 0.3;
       save.stats.poisonLands++;
+      if (save.stats.poisonLands === 1) showTip('poison_hit');
       checkAchievements();
       writeSave();
     } else {
       playSound('land');
     }
 
-    // Check section change
     const newSec = landedPad.section;
     if (newSec !== state.currentSection) {
       state.currentSection = newSec;
       state.visitedSections.add(newSec);
+      save.visitedSections = [...state.visitedSections];
       const sec = SECTIONS[newSec];
       cam.tx = sec.wx;
       cam.ty = sec.wy;
@@ -974,16 +1500,20 @@ function updateJump(ts) {
 }
 
 function updateFruitSpawning(ts) {
+  if (timer.phase !== 'focus') return;
   const stats = eff();
   if (ts - state.lastSpawn < stats.spawnMs) return;
   state.lastSpawn = ts;
 
-  const fruitCount = state.pads.filter(p => p.hasFruit).length;
+  const activePads = state.pads.filter(p => isActive(p));
+  const fruitCount = activePads.filter(p => p.hasFruit).length;
   if (fruitCount >= stats.maxFruit) return;
 
+  // If only 1 pad, allow fruit to spawn on frog's pad
+  const singlePad = activePads.length <= 1;
   const empty = state.pads
     .map((p, i) => ({ p, i }))
-    .filter(({ p, i }) => !p.hasFruit && i !== state.frog.pad);
+    .filter(({ p, i }) => isActive(p) && !p.hasFruit && (singlePad || i !== state.frog.pad));
   if (empty.length === 0) return;
 
   const pick = empty[Math.floor(Math.random() * empty.length)];
@@ -996,16 +1526,20 @@ function checkCollection() {
   const pad = state.pads[state.frog.pad];
   if (!pad.hasFruit) return;
   const basePts = { apple: 10, orange: 15, cherry: 25 };
-  const pts = (basePts[pad.fruitType] || 10) + eff().bonusPts;
+  const raw = (basePts[pad.fruitType] || 10) + eff().bonusPts;
+  const nightBonus = getDayPhase().xpBonus;
+  const pts = Math.floor(raw * (1 + nightBonus));
   const fruitType = pad.fruitType;
   state.score += pts;
+  timer.sessionScore += pts;
+  timer.sessionFruit++;
   pad.hasFruit = false;
   pad.fruitType = null;
   state.flash = 0.25;
   playSound(fruitType === 'cherry' ? 'collect_cherry' : fruitType === 'orange' ? 'collect_orange' : 'collect');
 
-  // Update stats for achievements
   save.stats.totalFruit++;
+  if (save.stats.totalFruit === 1) showTip('first_fruit');
   if (fruitType === 'apple') save.stats.apples++;
   else if (fruitType === 'orange') save.stats.oranges++;
   else if (fruitType === 'cherry') save.stats.cherries++;
@@ -1019,6 +1553,7 @@ function checkCollection() {
     state.levelUp = 80;
     state.flash = 0.5;
     playSound('levelup');
+    showTip('first_level');
   }
   checkAchievements();
   writeSave();
@@ -1029,28 +1564,84 @@ function checkAchievements() {
     if (save.achievements.includes(a.id)) return;
     if (a.check(save.stats, state, save)) {
       save.achievements.push(a.id);
-      state.achievementToast = { name: a.name, desc: a.desc, timer: 180 };
+      state.achievementToasts.push({ name: a.name, desc: a.desc, timer: 180 });
       playSound('achievement');
       writeSave();
     }
   });
 }
 
+// ─── Auto-Hop AI ───────────────────────────────────
+function autoHop(ts) {
+  if (timer.phase !== 'focus') return;
+  const f = state.frog;
+  if (f.jumping || f.stunned) return;
+  if (ts - f.lastLanded < eff().hopCooldown) return;
+
+  const cur = state.pads[f.pad];
+  const dirs = ['up', 'down', 'left', 'right'];
+  let candidates = [];
+
+  dirs.forEach(dir => {
+    const idx = findTargetPad(dir);
+    if (idx >= 0) {
+      const pad = state.pads[idx];
+      const d = dist(cur, pad);
+      candidates.push({ idx, pad, d, hasFruit: pad.hasFruit, isPoisoned: pad.isPoisoned });
+    }
+  });
+
+  if (candidates.length === 0) return;
+
+  const seen = new Set();
+  candidates = candidates.filter(c => {
+    if (seen.has(c.idx)) return false;
+    seen.add(c.idx); return true;
+  });
+
+  const fruitPads = candidates.filter(c => c.hasFruit && !c.isPoisoned);
+  const safePads = candidates.filter(c => !c.isPoisoned);
+
+  let pick;
+  if (fruitPads.length > 0) {
+    fruitPads.sort((a, b) => a.d - b.d);
+    pick = fruitPads[0];
+  } else if (safePads.length > 0) {
+    pick = safePads[Math.floor(Math.random() * safePads.length)];
+  } else {
+    pick = candidates[Math.floor(Math.random() * candidates.length)];
+  }
+
+  f.target = pick.idx;
+  f.jumping = true;
+  f.jumpStart = ts;
+  playSound('jump');
+}
+
 // ─── Update & Draw ──────────────────────────────────
 function update(ts) {
   updateCamera();
-  // Stun timer
+  updatePomo();
   if (state.frog.stunned && ts >= state.frog.stunEnd) {
     state.frog.stunned = false;
     playSound('stunEnd');
   }
+  autoHop(ts);
   updateJump(ts);
   updateFruitSpawning(ts);
+  updateDecorationGrowth(ts);
+  // Auto-collect if sitting on fruit (1-pad idle scenario)
+  if (!state.frog.jumping) checkCollection();
 }
 
+let _biomeCache = null, _biomeSec = -1;
 function draw() {
+  // Cache biome lookup per frame
+  if (state.currentSection !== _biomeSec) {
+    _biomeCache = BIOMES[SECTIONS[state.currentSection].biome];
+    _biomeSec = state.currentSection;
+  }
   drawWater();
-  // Screen shake from poison stun
   const shaking = state.screenShake > 0;
   if (shaking) {
     const sx = Math.floor((Math.random() - 0.5) * 3);
@@ -1059,10 +1650,25 @@ function draw() {
     ctx.translate(sx, sy);
     state.screenShake--;
   }
+
+  // Draw locked pad hints (faint outlines)
   state.pads.forEach(pad => {
+    if (isActive(pad)) return;
+    if (!inView(pad.x, pad.y, 20)) return;
+    const sx = Math.floor(pad.x - cam.x), sy = Math.floor(pad.y - cam.y);
+    ctx.fillStyle = 'rgba(255,255,255,0.04)';
+    const r = CONFIG.PAD_RADIUS;
+    for (let dy = -r; dy <= r; dy += 2) {
+      const w = Math.floor(Math.sqrt(r * r - dy * dy));
+      ctx.fillRect(sx - w, sy + dy, w * 2, 1);
+    }
+  });
+
+  // Draw active pads
+  state.pads.forEach(pad => {
+    if (!isActive(pad)) return;
     if (!inView(pad.x, pad.y, 20)) return;
     drawLilyPad(pad.x - cam.x, pad.y - cam.y, CONFIG.PAD_RADIUS, pad.isBridge, pad.isPoisoned);
-    // Poison bubbles
     if (pad.isPoisoned) {
       const px = pad.x - cam.x, py = pad.y - cam.y;
       for (let b = 0; b < 3; b++) {
@@ -1075,6 +1681,7 @@ function draw() {
         }
       }
     }
+    drawPadDecoration(pad);
     drawFruitOnPad(pad);
   });
   drawFrog();
@@ -1085,12 +1692,27 @@ function draw() {
   drawSectionLabel();
   drawEdgeArrows();
   drawHUD();
+  drawTip();
   drawAchievementToast();
 }
 
 // ─── Upgrade Screen ─────────────────────────────────
 function buildMenu() {
   const items = [];
+  items.push({ type: 'header', text: '~ POND ~' });
+  if (save.padLevel < 10) {
+    const expandCost = save.padLevel <= 3 ? 1 : save.padLevel <= 6 ? 2 : 3;
+    items.push({
+      type: 'upgrade', id: 'expand', name: 'EXPAND ' + save.padLevel + '/10',
+      desc: '+1 pad per biome', cost: expandCost, owned: false, selectable: true, isExpand: true,
+    });
+  } else {
+    items.push({
+      type: 'upgrade', id: 'expand', name: 'EXPAND 10/10',
+      desc: 'fully expanded', cost: 0, owned: true, selectable: false, isExpand: true,
+    });
+  }
+
   items.push({ type: 'header', text: '~ FROGS ~' });
   FROGS.forEach((f, i) => {
     items.push({
@@ -1113,129 +1735,438 @@ function buildMenu() {
       cost: u.cost, owned: save.upgrades.includes(u.id), selectable: true,
     });
   });
+  items.push({ type: 'header', text: '~ FOCUS ~' });
+  UPGRADES.filter(u => u.cat === 'focus').forEach(u => {
+    items.push({
+      type: 'upgrade', id: u.id, name: u.name, desc: u.desc,
+      cost: u.cost, owned: save.upgrades.includes(u.id), selectable: true,
+    });
+  });
   return items;
 }
 
-function menuMove(dir) {
-  const items = state.menuItems;
-  let c = state.menuCursor;
+function refreshShop() {
+  state.shopItems = buildMenu();
+  state.shopDescLines = null;
+  state.shopTotalH = state.shopItems.reduce((s, it) =>
+    s + (it.type === 'header' ? SHOP_HDR_H : SHOP_ITEM_H), 0);
+  if (!state.shopItems[state.shopCursor]?.selectable) {
+    state.shopCursor = state.shopItems.findIndex(i => i.selectable);
+  }
+}
+
+function shopMove(dir) {
+  const items = state.shopItems;
+  if (!items.length) return;
+  let c = state.shopCursor;
   do {
     c += dir;
     if (c < 0) c = items.length - 1;
     if (c >= items.length) c = 0;
-  } while (!items[c].selectable && c !== state.menuCursor);
-  state.menuCursor = c;
+  } while (!items[c].selectable && c !== state.shopCursor);
+  state.shopCursor = c;
+  state.shopDescLines = null; // invalidate cached description
 }
 
-function menuSelect() {
-  const item = state.menuItems[state.menuCursor];
+function shopSelect() {
+  const item = state.shopItems[state.shopCursor];
   if (!item || !item.selectable) return;
 
   if (item.type === 'frog') {
     if (item.owned) {
       save.selectedFrog = item.index;
-      writeSave(); state.menuItems = buildMenu();
+      writeSave(); refreshShop();
     } else if (save.skillPoints >= item.cost) {
       save.skillPoints -= item.cost;
       save.unlocked.push(item.index);
       save.selectedFrog = item.index;
-      writeSave(); state.menuItems = buildMenu();
+      writeSave(); refreshShop();
     }
   } else if (item.type === 'upgrade') {
-    if (!item.owned && save.skillPoints >= item.cost) {
+    if (item.isExpand) {
+      if (save.padLevel < 10 && save.skillPoints >= item.cost) {
+        save.skillPoints -= item.cost;
+        save.padLevel++;
+        if (save.padLevel === 4) showTip('bridges');
+        checkAchievements();
+        writeSave(); refreshShop();
+      }
+    } else if (!item.owned && save.skillPoints >= item.cost) {
       save.skillPoints -= item.cost;
       save.upgrades.push(item.id);
-      writeSave(); state.menuItems = buildMenu();
+      invalidateEff();
+      writeSave(); refreshShop();
     }
   }
 }
 
-function drawUpgradeScreen() {
-  drawWater();
-  drawAtmosphere();
-  ctx.fillStyle = '#000000aa';
+// ─── Mobile Shop Overlay ────────────────────────────
+function drawShopOverlay() {
+  const margin = 12;
+  const pw = W - margin * 2;
+  const px = margin;
+  const top = 16;
+
+  // Dim background
+  ctx.fillStyle = 'rgba(10,10,18,0.92)';
   ctx.fillRect(0, 0, W, H);
 
+  // Header
   ctx.fillStyle = P[3];
-  ctx.font = `7px ${F}`;
-  ctx.textAlign = 'center';
+  ctx.font = `bold 8px ${F}`;
+  ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
-  ctx.fillText('UPGRADES', W / 2, 6);
+  ctx.fillText('UPGRADES', px + 2, top);
 
   ctx.fillStyle = P[10];
-  ctx.font = `5px ${F}`;
-  ctx.fillText('SKILL PTS: ' + save.skillPoints, W / 2, 18);
+  ctx.font = `7px ${F}`;
+  ctx.textAlign = 'right';
+  ctx.fillText(save.skillPoints + 'SP', px + pw - 2, top);
 
-  let y = 28;
-  const items = state.menuItems;
+  // Close button
+  ctx.fillStyle = '#ffffff66';
+  ctx.fillRect(px + pw - 14, top - 2, 12, 12);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `7px ${F}`;
+  ctx.textAlign = 'center';
+  ctx.fillText('X', px + pw - 8, top);
+
+  ctx.fillStyle = '#ffffff18';
+  ctx.fillRect(px, top + 14, pw, 1);
+
+  // Item list
+  const items = state.shopItems;
+  if (!items.length) return;
+  const itemH = 16, headerH = 14;
+  const viewTop = top + 18, viewBottom = H - 36;
+  const viewH = viewBottom - viewTop;
+
+  // Auto-scroll to cursor
+  let cursorY = 0;
+  for (let i = 0; i < state.shopCursor && i < items.length; i++) {
+    cursorY += items[i].type === 'header' ? headerH : itemH;
+  }
+  if (cursorY < state.shopScroll) state.shopScroll = cursorY;
+  if (cursorY > state.shopScroll + viewH - itemH) state.shopScroll = cursorY - viewH + itemH + 2;
+  if (state.shopScroll < 0) state.shopScroll = 0;
+
+  // Clip to view area
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(px, viewTop, pw, viewH);
+  ctx.clip();
+
+  let y = viewTop - state.shopScroll;
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
-    const sel = i === state.menuCursor;
+    if (item.type === 'header') {
+      if (y + headerH > viewTop && y < viewBottom) {
+        ctx.fillStyle = P[15];
+        ctx.font = `6px ${F}`;
+        ctx.textAlign = 'center';
+        ctx.fillText(item.text, px + pw / 2, y + 4);
+      }
+      y += headerH;
+      continue;
+    }
+    const sel = i === state.shopCursor;
+    if (y + itemH > viewTop && y < viewBottom) {
+      if (sel) {
+        ctx.fillStyle = '#ffffff14';
+        ctx.fillRect(px + 2, y, pw - 4, itemH - 1);
+        ctx.fillStyle = P[10];
+        ctx.font = `7px ${F}`;
+        ctx.textAlign = 'left';
+        ctx.fillText('\u25B8', px + 4, y + 3);
+      }
+      if (item.type === 'frog') {
+        const fDef = FROGS[item.index];
+        ctx.fillStyle = fDef.colorMap ? P[fDef.colorMap[3]] : P[3];
+        ctx.fillRect(px + 16, y + 5, 5, 5);
+      }
+      ctx.fillStyle = item.owned ? '#666666' : sel ? '#ffffff' : '#cccccc';
+      ctx.font = `7px ${F}`;
+      ctx.textAlign = 'left';
+      const nameX = item.type === 'frog' ? px + 24 : px + 16;
+      ctx.fillText(item.name, nameX, y + 3);
+      ctx.textAlign = 'right';
+      if (item.type === 'frog' && item.active) {
+        ctx.fillStyle = P[3];
+        ctx.fillText('\u2713', px + pw - 4, y + 3);
+      } else if (item.owned) {
+        ctx.fillStyle = '#444444';
+        ctx.fillText('\u2713', px + pw - 4, y + 3);
+      } else {
+        ctx.fillStyle = save.skillPoints >= item.cost ? P[10] : '#e43b44';
+        ctx.fillText(item.cost + 'SP', px + pw - 4, y + 3);
+      }
+    }
+    y += itemH;
+  }
+  state.shopTotalH = y - viewTop + state.shopScroll;
+  ctx.restore();
+
+  // Scroll indicators
+  if (state.shopScroll > 0) {
+    ctx.fillStyle = '#ffffff44';
+    ctx.font = `6px ${F}`;
+    ctx.textAlign = 'center';
+    ctx.fillText('\u25B2', px + pw / 2, viewTop - 2);
+  }
+  if (state.shopScroll + viewH < state.shopTotalH) {
+    ctx.fillStyle = '#ffffff44';
+    ctx.font = `6px ${F}`;
+    ctx.textAlign = 'center';
+    ctx.fillText('\u25BC', px + pw / 2, viewBottom + 2);
+  }
+
+  // Description
+  const selItem = items[state.shopCursor];
+  if (selItem && selItem.desc) {
+    ctx.font = `6px ${F}`;
+    const maxW = pw - 8;
+    const words = selItem.desc.split(' ');
+    const lines = []; let line = '';
+    for (const w of words) {
+      const test = line ? line + ' ' + w : w;
+      if (ctx.measureText(test).width > maxW && line) { lines.push(line); line = w; }
+      else { line = test; }
+    }
+    if (line) lines.push(line);
+    ctx.fillStyle = '#ffffff88';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    for (let l = 0; l < Math.min(lines.length, 2); l++) {
+      ctx.fillText(lines[l], px + pw / 2, viewBottom + 6 + l * 9);
+    }
+  }
+
+  // Stats footer
+  ctx.fillStyle = '#ffffff55';
+  ctx.font = `5px ${F}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  const st = save.stats;
+  ctx.fillText((st.focusMinutes || 0) + 'MIN \u00b7 ' + save.achievements.length + '/' + ACHIEVEMENTS.length + ' FEATS', W / 2, H - 10);
+}
+
+function handleTouchShopOverlay(pos) {
+  const margin = 12;
+  const pw = W - margin * 2;
+  const px = margin;
+  const top = 16;
+
+  // Close button
+  if (pos.x >= px + pw - 14 && pos.x <= px + pw && pos.y >= top - 2 && pos.y <= top + 12) {
+    state.shopOpen = false; return;
+  }
+
+  const itemH = 16, headerH = 14;
+  const viewTop = top + 18, viewBottom = H - 36;
+
+  let y = viewTop - state.shopScroll;
+  for (let i = 0; i < state.shopItems.length; i++) {
+    const item = state.shopItems[i];
+    const h = item.type === 'header' ? headerH : itemH;
+    if (item.selectable && pos.y >= y && pos.y <= y + h && pos.x >= px && pos.x <= px + pw) {
+      state.shopCursor = i;
+      state.shopDescLines = null;
+      shopSelect();
+      return;
+    }
+    y += h;
+  }
+}
+
+function drawShopPanel() {
+  const px = W; // panel left edge (right of game area)
+  const pw = PANEL_W;
+
+  // Panel background
+  ctx.fillStyle = '#0a0a12';
+  ctx.fillRect(px, 0, pw, H);
+
+  // Left border accent
+  ctx.fillStyle = P[3] + '44';
+  ctx.fillRect(px, 0, 1, H);
+
+  // Header
+  ctx.fillStyle = P[3];
+  ctx.font = `bold 7px ${F}`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText('UPGRADES', px + 5, 4);
+
+  ctx.fillStyle = P[10];
+  ctx.font = `6px ${F}`;
+  ctx.textAlign = 'right';
+  ctx.fillText(save.skillPoints + 'SP', px + pw - 4, 5);
+
+  // Divider line under header
+  ctx.fillStyle = '#ffffff18';
+  ctx.fillRect(px + 3, 16, pw - 6, 1);
+
+  // Item list
+  const items = state.shopItems;
+  if (!items.length) return;
+
+  const itemH = SHOP_ITEM_H, headerH = SHOP_HDR_H;
+  const viewTop = SHOP_TOP, viewBottom = SHOP_BOT;
+  const viewH = viewBottom - viewTop;
+
+  // Auto-scroll to keep cursor visible
+  let cursorY = 0;
+  for (let i = 0; i < state.shopCursor && i < items.length; i++) {
+    cursorY += items[i].type === 'header' ? headerH : itemH;
+  }
+  if (cursorY < state.shopScroll) state.shopScroll = cursorY;
+  if (cursorY > state.shopScroll + viewH - itemH) state.shopScroll = cursorY - viewH + itemH + 2;
+  if (state.shopScroll < 0) state.shopScroll = 0;
+
+  // Draw items (bounds-checked per item)
+  let y = viewTop - state.shopScroll;
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
 
     if (item.type === 'header') {
-      ctx.fillStyle = P[15];
-      ctx.font = `5px ${F}`;
-      ctx.textAlign = 'center';
-      ctx.fillText(item.text, W / 2, y);
-      y += 10;
+      if (y + headerH > viewTop && y < viewBottom) {
+        ctx.fillStyle = P[15];
+        ctx.font = `5px ${F}`;
+        ctx.textAlign = 'center';
+        ctx.fillText(item.text, px + pw / 2, y + 2);
+      }
+      y += headerH;
       continue;
     }
 
-    if (sel) {
-      ctx.fillStyle = '#ffffff18';
-      ctx.fillRect(6, y - 1, W - 12, 10);
-      ctx.fillStyle = P[10];
-      ctx.font = `5px ${F}`;
+    const sel = i === state.shopCursor;
+
+    if (y + itemH > viewTop && y < viewBottom) {
+      // Selection highlight
+      if (sel) {
+        ctx.fillStyle = '#ffffff14';
+        ctx.fillRect(px + 2, y, pw - 4, itemH - 1);
+        ctx.fillStyle = P[10];
+        ctx.font = `6px ${F}`;
+        ctx.textAlign = 'left';
+        ctx.fillText('\u25B8', px + 3, y + 2);
+      }
+
+      // Frog color swatch
+      if (item.type === 'frog') {
+        const fDef = FROGS[item.index];
+        ctx.fillStyle = fDef.colorMap ? P[fDef.colorMap[3]] : P[3];
+        ctx.fillRect(px + 12, y + 3, 4, 4);
+      }
+
+      // Item name
+      ctx.fillStyle = item.owned ? '#666666' : sel ? '#ffffff' : '#cccccc';
+      ctx.font = `6px ${F}`;
       ctx.textAlign = 'left';
-      ctx.fillText('>', 8, y);
-    }
+      const nameX = item.type === 'frog' ? px + 19 : px + 12;
+      ctx.fillText(item.name, nameX, y + 2);
 
-    if (item.type === 'frog') {
-      const fDef = FROGS[item.index];
-      ctx.fillStyle = fDef.colorMap ? P[fDef.colorMap[3]] : P[3];
-      ctx.fillRect(16, y + 1, 4, 4);
+      // Cost / status (right side)
+      ctx.textAlign = 'right';
+      if (item.type === 'frog' && item.active) {
+        ctx.fillStyle = P[3];
+        ctx.fillText('\u2713', px + pw - 4, y + 2);
+      } else if (item.owned) {
+        ctx.fillStyle = '#444444';
+        ctx.fillText('\u2713', px + pw - 4, y + 2);
+      } else {
+        ctx.fillStyle = save.skillPoints >= item.cost ? P[10] : '#e43b44';
+        ctx.fillText(item.cost + 'SP', px + pw - 4, y + 2);
+      }
     }
-
-    ctx.fillStyle = item.owned ? '#999999' : '#ffffff';
-    ctx.font = `5px ${F}`;
-    ctx.textAlign = 'left';
-    ctx.fillText(item.name, item.type === 'frog' ? 22 : 16, y);
-
-    ctx.textAlign = 'right';
-    if (item.type === 'frog' && item.active) {
-      ctx.fillStyle = P[3];
-      ctx.fillText('USE', W - 10, y);
-    } else if (item.owned) {
-      ctx.fillStyle = '#777777';
-      ctx.fillText('OWN', W - 10, y);
-    } else {
-      ctx.fillStyle = save.skillPoints >= item.cost ? P[10] : '#e43b44';
-      ctx.fillText(item.cost + 'SP', W - 10, y);
-    }
-    y += 11;
+    y += itemH;
   }
 
-  ctx.fillStyle = '#ffffff66';
-  ctx.font = `4px ${F}`;
-  ctx.textAlign = 'center';
-  ctx.fillText(hasTouchInput ? 'TAP ITEM · TOP:BACK' : 'UP/DN:MOVE SPC:BUY ESC:BACK', W / 2, H - 6);
-
-  if (hasTouchInput) {
-    ctx.fillStyle = '#ffffffaa';
+  // Scroll indicators
+  if (state.shopScroll > 0) {
+    ctx.fillStyle = '#ffffff44';
     ctx.font = `5px ${F}`;
-    ctx.textAlign = 'left';
+    ctx.textAlign = 'center';
+    ctx.fillText('\u25B2', px + pw / 2, viewTop - 1);
+  }
+  if (state.shopScroll + viewH < state.shopTotalH) {
+    ctx.fillStyle = '#ffffff44';
+    ctx.font = `5px ${F}`;
+    ctx.textAlign = 'center';
+    ctx.fillText('\u25BC', px + pw / 2, viewBottom + 1);
+  }
+
+  // Divider above description
+  ctx.fillStyle = '#ffffff18';
+  ctx.fillRect(px + 3, viewBottom + 7, pw - 6, 1);
+
+  // Selected item description (word-wrapped, cached)
+  const selItem = items[state.shopCursor];
+  if (selItem && selItem.desc) {
+    if (!state.shopDescLines) {
+      ctx.font = `6px ${F}`;
+      const maxW = pw - 8;
+      const words = selItem.desc.split(' ');
+      const lines = [];
+      let line = '';
+      for (const w of words) {
+        const test = line ? line + ' ' + w : w;
+        if (ctx.measureText(test).width > maxW && line) {
+          lines.push(line);
+          line = w;
+        } else { line = test; }
+      }
+      if (line) lines.push(line);
+      state.shopDescLines = lines.slice(0, 1);
+    }
+    ctx.fillStyle = '#ffffff88';
+    ctx.font = `6px ${F}`;
+    ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
-    ctx.fillText('< BACK', 4, 8);
+    const lines = state.shopDescLines;
+    for (let l = 0; l < lines.length; l++) {
+      ctx.fillText(lines[l], px + pw / 2, viewBottom + 10 + l * 8);
+    }
   }
+
+  // Stats footer
+  ctx.fillStyle = '#ffffff18';
+  ctx.fillRect(px + 3, H - 22, pw - 6, 1);
+
+  const st = save.stats;
+  ctx.font = `5px ${F}`;
+  ctx.textBaseline = 'top';
+
+  // Fruit counts: colored dots + numbers
+  const fruits = [
+    { n: st.apples,  c: '#e43b44' },  // red apple
+    { n: st.oranges, c: '#f7a541' },  // orange
+    { n: st.cherries,c: '#c32454' },  // cherry
+  ];
+  let fx = px + 6;
+  for (const f of fruits) {
+    ctx.fillStyle = f.c;
+    ctx.fillRect(fx, H - 17, 3, 3);
+    ctx.fillStyle = '#ffffff88';
+    ctx.textAlign = 'left';
+    ctx.fillText(f.n, fx + 5, H - 18);
+    fx += ctx.measureText(f.n + '').width + 10;
+  }
+
+  // Focus time + achievements
+  ctx.fillStyle = '#ffffff55';
+  ctx.textAlign = 'center';
+  const focusText = (st.focusMinutes || 0) + 'MIN \u00b7 ' + save.achievements.length + '/' + ACHIEVEMENTS.length + ' FEATS';
+  ctx.fillText(focusText, px + pw / 2, H - 8);
 }
 
 // ─── Pause Menu ─────────────────────────────────────
-const PAUSE_ITEMS = ['RESUME', 'UPGRADES', 'RESTART'];
+const PAUSE_ITEMS = ['RESUME', 'RESTART'];
 
 function drawPauseMenu() {
-  // Draw the game frozen underneath
   drawWater();
   state.pads.forEach(pad => {
+    if (!isActive(pad)) return;
     if (!inView(pad.x, pad.y, 20)) return;
     drawLilyPad(pad.x - cam.x, pad.y - cam.y, CONFIG.PAD_RADIUS, pad.isBridge, pad.isPoisoned);
     drawFruitOnPad(pad);
@@ -1243,127 +2174,192 @@ function drawPauseMenu() {
   drawFrog();
   drawAtmosphere();
 
-  // Dim overlay
   ctx.fillStyle = '#000000bb';
   ctx.fillRect(0, 0, W, H);
 
-  // Title
   ctx.fillStyle = P[3];
-  ctx.font = `7px ${F}`;
+  ctx.font = `${isMobile ? 14 : 10}px ${F}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('PAUSED', W / 2, 40);
+  ctx.fillText('PAUSED', W / 2, isMobile ? 50 : 54);
 
-  // Stats
   ctx.fillStyle = '#ffffffaa';
-  ctx.font = `5px ${F}`;
-  ctx.fillText('LV' + save.level + '  ' + state.score + 'PTS  ' + save.skillPoints + 'SP', W / 2, 56);
+  ctx.font = `${isMobile ? 8 : 7}px ${F}`;
+  ctx.fillText('LV' + save.level + '  ' + state.score + 'PTS  ' + save.skillPoints + 'SP', W / 2, isMobile ? 72 : 74);
 
-  // Menu items
+  const pSpacing = isMobile ? 32 : 24;
+  const pHeight = isMobile ? 26 : 20;
+  const pFont = isMobile ? 10 : 8;
   PAUSE_ITEMS.forEach((label, i) => {
-    const y = 78 + i * 18;
+    const y = 104 + i * pSpacing;
     const sel = i === state.pauseCursor;
 
     if (sel) {
       ctx.fillStyle = '#ffffff18';
-      ctx.fillRect(W / 2 - 55, y - 6, 110, 16);
+      ctx.fillRect(W / 2 - 74, y - pHeight / 2, 148, pHeight);
     }
 
     ctx.fillStyle = sel ? P[10] : '#ffffffbb';
-    ctx.font = `6px ${F}`;
+    ctx.font = `${pFont}px ${F}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText((sel ? '> ' : '  ') + label + (sel ? ' <' : ''), W / 2, y);
   });
 
-  // Footer
   ctx.fillStyle = '#ffffff66';
-  ctx.font = `4px ${F}`;
-  ctx.fillText(hasTouchInput ? 'TAP TO SELECT' : 'ESC:RESUME', W / 2, H - 10);
+  ctx.font = `${isMobile ? 8 : 6}px ${F}`;
+  ctx.fillText(hasTouchInput ? 'TAP TO SELECT' : 'ESC:RESUME', W / 2, H - 14);
 }
 
 function pauseSelect() {
   const action = PAUSE_ITEMS[state.pauseCursor];
   if (action === 'RESUME') {
     state.screen = 'playing';
-  } else if (action === 'UPGRADES') {
-    state.prevScreen = 'paused';
-    enterUpgrades();
   } else if (action === 'RESTART') {
     startGame();
   }
 }
 
 // ─── Title Screen ───────────────────────────────────
+// Heatmap color by session count — tune these thresholds to shape behavior!
+// Low bar (1=green) rewards showing up; high bar (5=gold) rewards marathons.
+function heatmapColor(count) {
+  if (count === 0) return '#181425';  // empty — near-black (matches bg)
+  if (count === 1) return '#2d5a3d';  // showed up — dim green
+  if (count <= 3)  return '#3e8948';  // solid day — medium green
+  if (count <= 5)  return '#63c74d';  // strong day — bright green
+  return '#f7a541';                   // marathon — gold
+}
+
+function drawTitleHeatmap() {
+  const CELL = 5, GAP = 1, STEP = CELL + GAP;
+  const COLS = 5, ROWS = 7;
+  const gridW = COLS * STEP - GAP;
+  const gridH = ROWS * STEP - GAP;
+  const gx = Math.floor(W / 2 - gridW / 2) + 6;
+  const gy = 156;
+
+  // Day labels: M, W, F
+  ctx.font = `5px ${F}`;
+  ctx.fillStyle = '#ffffff33';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'top';
+  ctx.fillText('M', gx - 2, gy);
+  ctx.fillText('W', gx - 2, gy + 2 * STEP);
+  ctx.fillText('F', gx - 2, gy + 4 * STEP);
+
+  // Build 35-day window ending today
+  const todayStr = getDateStr();
+  const todayDate = new Date(todayStr + 'T12:00:00');
+  const hist = save.history || {};
+
+  for (let i = 0; i < 35; i++) {
+    const daysAgo = 34 - i;
+    const d = new Date(todayDate);
+    d.setDate(d.getDate() - daysAgo);
+    const ds = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    const col = Math.floor(i / 7);
+    const row = i % 7;
+    const count = hist[ds] || 0;
+
+    // TODO: You'll implement the color mapping here (Step 5 user contribution)
+    const color = heatmapColor(count);
+
+    // Today highlight
+    if (daysAgo === 0) {
+      ctx.fillStyle = '#ffffff44';
+      ctx.fillRect(gx + col * STEP - 1, gy + row * STEP - 1, CELL + 2, CELL + 2);
+    }
+    ctx.fillStyle = color;
+    ctx.fillRect(gx + col * STEP, gy + row * STEP, CELL, CELL);
+  }
+
+  // Label below
+  ctx.fillStyle = '#ffffff33';
+  ctx.font = `5px ${F}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillText('FOCUS GARDEN', W / 2 + 3, gy + gridH + 4);
+}
+
 function drawTitleScreen() {
   drawWater();
-  drawLilyPad(W / 2, H / 2 + 16, 18);
-  drawLilyPad(40, 140, 12);
-  drawLilyPad(155, 135, 13);
-  drawLilyPad(60, 50, 10);
-  drawLilyPad(140, 60, 11);
+  drawLilyPad(W / 2, H / 2 + 22, 22, false, false, 0);
+  drawLilyPad(54, 186, 16, false, false, 2);
+  drawLilyPad(206, 180, 17, false, false, 3);
+  drawLilyPad(80, 66, 13, false, false, 1);
+  drawLilyPad(186, 80, 14, false, false, 4);
 
   const frogDef = FROGS[save.selectedFrog];
-  drawSprite(remapSprite(FROG, frogDef.colorMap), W / 2 - 6, H / 2 + 6);
+  drawSprite(remapSprite(FROG, frogDef.colorMap), W / 2 - 6, H / 2 + 12);
   drawAtmosphere();
 
   ctx.fillStyle = P[3];
-  ctx.font = `8px ${F}`;
+  ctx.font = `11px ${F}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('FROG', W / 2, 24);
-  ctx.fillText('POND', W / 2, 38);
+  ctx.fillText('FOCUS', W / 2, 32);
+  ctx.fillText('FROGS', W / 2, 50);
 
   ctx.fillStyle = P[4];
-  ctx.font = `5px ${F}`;
-  ctx.fillText('LV' + save.level + ' ' + frogDef.name, W / 2, 52);
+  ctx.font = `7px ${F}`;
+  ctx.fillText('LV' + save.level + ' ' + frogDef.name, W / 2, 68);
 
-  if (save.skillPoints > 0) {
-    ctx.fillStyle = P[10];
-    ctx.font = `5px ${F}`;
-    ctx.fillText(save.skillPoints + ' SP READY!', W / 2, H - 48);
+  ctx.fillStyle = '#ffffff66';
+  ctx.font = `6px ${F}`;
+  ctx.fillText(save.padLevel + '/10 PADS \u00b7 ' + save.achievements.length + ' FEATS', W / 2, 82);
+
+  // ─── Streak display ───
+  if (save.streakCount > 0) {
+    ctx.fillStyle = '#f7a541';
+    ctx.font = `7px ${F}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const streakLabel = save.streakCount + ' DAY STREAK';
+    ctx.fillText(streakLabel, W / 2, 96);
+    // Tiny pixel flame to the left of text
+    const tw = ctx.measureText(streakLabel).width;
+    const fx = Math.floor(W / 2 - tw / 2) - 7;
+    ctx.fillStyle = '#e43b44';
+    ctx.fillRect(fx + 1, 92, 1, 4);
+    ctx.fillRect(fx, 94, 3, 3);
+    ctx.fillStyle = '#f7a541';
+    ctx.fillRect(fx + 1, 91, 1, 1);
   }
+
+  // ─── Daily Challenge banner ───
+  const ch = getDailyChallenge();
+  const chKey = getDateStr() + ':' + ch.id;
+  const chDone = save.challengesCompleted.includes(chKey);
+  const chY = 108;
+  ctx.fillStyle = chDone ? '#2d5a3d88' : '#1a1c2c99';
+  ctx.fillRect(20, chY, W - 40, 18);
+  ctx.fillStyle = chDone ? '#63c74d' : '#f7a541';
+  ctx.font = `5px ${F}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillText(chDone ? 'CHALLENGE COMPLETE' : 'DAILY CHALLENGE', W / 2, chY + 2);
+  ctx.fillStyle = chDone ? '#ffffff66' : '#ffffffaa';
+  ctx.fillText(ch.text, W / 2, chY + 9);
+
+  // ─── Focus Garden heatmap ───
+  drawTitleHeatmap();
 
   const blink = Math.floor(state.time / 500) % 2 === 0;
   if (blink) {
     ctx.fillStyle = P[10];
-    ctx.font = `6px ${F}`;
-    ctx.fillText(hasTouchInput ? 'TAP TO START' : 'PRESS SPACE', W / 2, H - 30);
+    ctx.font = `8px ${F}`;
+    ctx.fillText(hasTouchInput ? 'TAP TO START' : 'PRESS SPACE', W / 2, H - 40);
   }
-  ctx.fillStyle = '#ffffff88';
-  ctx.font = `5px ${F}`;
-  ctx.fillText(hasTouchInput ? 'TAP HERE: UPGRADES' : 'ESC = UPGRADES', W / 2, H - 14);
 }
 
 // ─── Input ──────────────────────────────────────────
-const KEYS = {
-  ArrowUp: 'up', KeyW: 'up',
-  ArrowDown: 'down', KeyS: 'down',
-  ArrowLeft: 'left', KeyA: 'left',
-  ArrowRight: 'right', KeyD: 'right',
-};
-
 document.addEventListener('keydown', (e) => {
-  // ─ Title ─
   if (state.screen === 'title') {
     if (e.code === 'Space' || e.code === 'Enter') startGame();
-    if (e.code === 'Escape' || e.code === 'KeyU') {
-      state.prevScreen = 'title';
-      enterUpgrades();
-    }
     return;
   }
 
-  // ─ Upgrades ─
-  if (state.screen === 'upgrades') {
-    if (e.code === 'ArrowUp' || e.code === 'KeyW') { e.preventDefault(); menuMove(-1); }
-    if (e.code === 'ArrowDown' || e.code === 'KeyS') { e.preventDefault(); menuMove(1); }
-    if (e.code === 'Space' || e.code === 'Enter') menuSelect();
-    if (e.code === 'Escape') state.screen = state.prevScreen;
-    return;
-  }
-
-  // ─ Paused ─
   if (state.screen === 'paused') {
     if (e.code === 'ArrowUp' || e.code === 'KeyW') {
       e.preventDefault();
@@ -1378,23 +2374,30 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  // ─ Playing ─
   if (state.screen !== 'playing') return;
+
+  // ESC → pause
   if (e.code === 'Escape') {
     state.screen = 'paused';
     state.pauseCursor = 0;
     return;
   }
-  if (state.frog.jumping || state.frog.stunned) return;
-  const dir = KEYS[e.code];
-  if (!dir) return;
-  e.preventDefault();
-  const t = findTargetPad(dir);
-  if (t >= 0) {
-    state.frog.target = t;
-    state.frog.jumping = true;
-    state.frog.jumpStart = state.time;
-    playSound('jump');
+
+  // Up/Down → navigate shop panel
+  if (e.code === 'ArrowUp' || e.code === 'KeyW') { e.preventDefault(); shopMove(-1); return; }
+  if (e.code === 'ArrowDown' || e.code === 'KeyS') { e.preventDefault(); shopMove(1); return; }
+
+  // Space → buy upgrade OR start focus (if nothing to buy)
+  if (e.code === 'Space' || e.code === 'Enter') {
+    e.preventDefault();
+    const item = state.shopItems[state.shopCursor];
+    const canBuy = item && item.selectable && !item.owned && save.skillPoints >= (item.cost || 0);
+    if (canBuy) {
+      shopSelect();
+    } else if (e.code === 'Space' && timer.phase === 'idle') {
+      startFocus();
+    }
+    return;
   }
 });
 
@@ -1402,48 +2405,81 @@ document.addEventListener('keydown', (e) => {
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 
 function handleTouchTitle(pos) {
-  if (pos.y >= 160) { state.prevScreen = 'title'; enterUpgrades(); }
-  else startGame();
+  startGame();
+}
+
+function handleTouchShop(pos) {
+  // Taps within the shop panel (x > W)
+  const viewTop = SHOP_TOP, viewBottom = SHOP_BOT;
+  const itemH = SHOP_ITEM_H, headerH = SHOP_HDR_H;
+
+  let y = viewTop - state.shopScroll;
+  for (let i = 0; i < state.shopItems.length; i++) {
+    const item = state.shopItems[i];
+    const h = item.type === 'header' ? headerH : itemH;
+    if (item.selectable && pos.y >= y && pos.y <= y + h) {
+      state.shopCursor = i;
+      shopSelect();
+      return;
+    }
+    y += h;
+  }
 }
 
 function handleTouchPlaying(pos) {
-  if (pos.x >= W - 20 && pos.y <= 25) {
+  // Mobile shop overlay open — route all taps to it
+  if (isMobile && state.shopOpen) {
+    handleTouchShopOverlay(pos);
+    return;
+  }
+  // Desktop: tap in shop panel area
+  if (!isMobile && pos.x >= W) {
+    handleTouchShop(pos);
+    return;
+  }
+  // Pause button (larger hit area on mobile)
+  const pauseHitW = isMobile ? 34 : 26;
+  const pauseHitH = isMobile ? 28 : 34;
+  if (pos.x >= W - pauseHitW && pos.y <= pauseHitH) {
     state.screen = 'paused'; state.pauseCursor = 0; return;
   }
-  if (state.frog.jumping || state.frog.stunned) return;
-  const pad = state.pads[state.frog.pad];
-  const dx = pos.x - (pad.x - cam.x);
-  const dy = pos.y - (pad.y - cam.y);
-  if (Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
-  const dir = angleToDirection(dx, dy);
-  const t = findTargetPad(dir);
-  if (t >= 0) {
-    state.frog.target = t;
-    state.frog.jumping = true;
-    state.frog.jumpStart = state.time;
-    playSound('jump');
+  // Mobile: shop button tap
+  if (isMobile && hasTouchInput) {
+    const sbx = W - 30, sby = 30;
+    if (pos.x >= sbx && pos.x <= sbx + 26 && pos.y >= sby && pos.y <= sby + 22) {
+      state.shopOpen = true; return;
+    }
   }
+  // Minimap tap navigation (bridges unlocked)
+  if (save.padLevel >= 4) {
+    const s = isMobile ? 18 : 14, gap = 2;
+    const mx = W - (3 * s + 2 * gap) - 4, my = H - (3 * s + 2 * gap) - 14;
+    const cells = [[1,0,1],[0,1,2],[1,1,0],[2,1,3],[1,2,4]];
+    for (const [cx, cy, si] of cells) {
+      const rx = mx + cx * (s + gap), ry = my + cy * (s + gap);
+      if (pos.x >= rx && pos.x <= rx + s && pos.y >= ry && pos.y <= ry + s && si !== state.currentSection) {
+        navigateToSection(si); return;
+      }
+    }
+    // Edge arrow tap zones
+    const hitR = isMobile ? 20 : 15;
+    for (const az of getEdgeArrowHitZones()) {
+      if (pos.x >= az.x - hitR && pos.x <= az.x + hitR && pos.y >= az.y - hitR && pos.y <= az.y + hitR) {
+        navigateToSection(az.section); return;
+      }
+    }
+  }
+  if (timer.phase === 'idle') startFocus();
 }
 
 function handleTouchPaused(pos) {
+  const pSpacing = isMobile ? 32 : 24;
+  const pHalf = isMobile ? 16 : 12;
   for (let i = 0; i < PAUSE_ITEMS.length; i++) {
-    const y = 78 + i * 18;
-    if (pos.y >= y - 5 && pos.y <= y + 9 && pos.x >= 46 && pos.x <= 146) {
+    const y = 104 + i * pSpacing;
+    if (pos.y >= y - pHalf && pos.y <= y + pHalf && pos.x >= 40 && pos.x <= 216) {
       state.pauseCursor = i; pauseSelect(); return;
     }
-  }
-}
-
-function handleTouchUpgrades(pos) {
-  if (pos.y <= 16 || pos.y >= H - 12) { state.screen = state.prevScreen; return; }
-  let y = 28;
-  for (let i = 0; i < state.menuItems.length; i++) {
-    const item = state.menuItems[i];
-    if (item.type === 'header') { y += 10; continue; }
-    if (item.selectable && pos.y >= y - 1 && pos.y <= y + 9) {
-      state.menuCursor = i; menuSelect(); return;
-    }
-    y += 11;
   }
 }
 
@@ -1451,52 +2487,107 @@ function handleTouch(pos) {
   if (state.screen === 'title') handleTouchTitle(pos);
   else if (state.screen === 'playing') handleTouchPlaying(pos);
   else if (state.screen === 'paused') handleTouchPaused(pos);
-  else if (state.screen === 'upgrades') handleTouchUpgrades(pos);
 }
 
 canvas.addEventListener('touchstart', (e) => {
   e.preventDefault(); hasTouchInput = true;
-  handleTouch(touchToCanvas(e.changedTouches[0]));
+  const pos = touchToCanvas(e.changedTouches[0]);
+  swipeStart = { x: pos.x, y: pos.y, time: Date.now() };
 }, { passive: false });
-canvas.addEventListener('touchmove', (e) => { e.preventDefault(); }, { passive: false });
-canvas.addEventListener('touchend', (e) => { e.preventDefault(); }, { passive: false });
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  // Scroll shop overlay on drag
+  if (isMobile && state.shopOpen && swipeStart) {
+    const pos = touchToCanvas(e.changedTouches[0]);
+    const dy = swipeStart.y - pos.y;
+    const viewH = H - 36 - 34;
+    state.shopScroll = Math.max(0, Math.min(state.shopScroll + dy, Math.max(0, state.shopTotalH - viewH)));
+    swipeStart.y = pos.y;
+  }
+}, { passive: false });
+canvas.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  if (!swipeStart) return;
+  const pos = touchToCanvas(e.changedTouches[0]);
+  const dx = pos.x - swipeStart.x;
+  const dy = pos.y - swipeStart.y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  const elapsed = Date.now() - swipeStart.time;
+
+  if (dist > SWIPE_THRESHOLD && elapsed < 500 && state.screen === 'playing' && !state.shopOpen && save.padLevel >= 4) {
+    // It's a swipe — navigate between sections
+    const absDx = Math.abs(dx), absDy = Math.abs(dy);
+    let side;
+    if (absDx > absDy) { side = dx < 0 ? 'left' : 'right'; }
+    else { side = dy < 0 ? 'top' : 'bottom'; }
+    // Find adjacent section in swipe direction
+    for (const [sA, sB, bSide] of BORDERS) {
+      if (sA === state.currentSection && bSide === side) { navigateToSection(sB); break; }
+      else if (sB === state.currentSection) {
+        const flip = bSide === 'top' ? 'bottom' : bSide === 'bottom' ? 'top' : bSide === 'left' ? 'right' : 'left';
+        if (flip === side) { navigateToSection(sA); break; }
+      }
+    }
+  } else {
+    // It's a tap
+    handleTouch(pos);
+  }
+  swipeStart = null;
+}, { passive: false });
+
+// ─── Mouse Click (desktop) ────────────────────────
+canvas.addEventListener('mousedown', (e) => {
+  if (hasTouchInput) return;          // avoid double-fire on touch devices
+  handleTouch(touchToCanvas(e));      // mouse events have clientX/clientY too
+});
 
 // ─── Start / Loop ───────────────────────────────────
-function enterUpgrades() {
-  state.screen = 'upgrades';
-  state.menuItems = buildMenu();
-  state.menuCursor = state.menuItems.findIndex(i => i.selectable);
-}
-
 function startGame() {
   initAudio();
+  // Fullscreen on mobile
+  if (isMobile && !fullscreenRequested) {
+    fullscreenRequested = true;
+    const el = document.documentElement;
+    (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el).catch(() => {});
+  }
   state.screen = 'playing';
   state.score = 0;
   state.flash = 0;
   state.levelUp = 0;
   state.pads = generateWorld();
   state.currentSection = 0;
-  // Find center pad of section 0 (CENTER)
   state.frog.pad = state.pads.findIndex(p => p.section === 0);
   state.frog.jumping = false;
   state.lastSpawn = 0;
-  // Snap camera to CENTER section
   const sec = SECTIONS[0];
   cam.x = cam.tx = sec.wx;
   cam.y = cam.ty = sec.wy;
-  state.sectionName = 'CENTER';
+  state.sectionName = sec.name;
   state.sectionLabel = 60;
-  state.visitedSections = new Set([0]);
+  state.visitedSections = new Set(save.visitedSections || [0]);
   initAtmosphere();
+  refreshShop();
+  showTip('idle_hint');
+  if (save.stats.focusSessions >= 1) showTip('shop_hint');
 }
 
 function gameLoop(ts) {
   state.time = ts;
   if (state.atmosphere.fogPatches.length) updateAtmosphere();
-  if (state.screen === 'title') drawTitleScreen();
-  else if (state.screen === 'playing') { update(ts); draw(); }
-  else if (state.screen === 'paused') drawPauseMenu();
-  else if (state.screen === 'upgrades') drawUpgradeScreen();
+  if (state.screen === 'title') {
+    drawTitleScreen();
+    if (!isMobile) {
+      ctx.fillStyle = '#0a0a12';
+      ctx.fillRect(W, 0, PANEL_W, H);
+    }
+  } else if (state.screen === 'playing') {
+    update(ts); draw();
+    if (isMobile) { if (state.shopOpen) drawShopOverlay(); }
+    else drawShopPanel();
+  } else if (state.screen === 'paused') {
+    drawPauseMenu();
+    if (!isMobile) drawShopPanel();
+  }
   requestAnimationFrame(gameLoop);
 }
 
